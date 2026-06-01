@@ -7,6 +7,8 @@ description: Run the Humify codebase rehabilitation workflow. Use when the user 
 
 Use Humify to turn messy codebases into evidence-backed audit artifacts and safe refactor slices.
 
+Run Humify as a guided session. Show and explain what you find at each stage in the chat, and check in before moving on. The audit and plan files are a byproduct; the value is the explanation. Follow `reference/GUIDED-RUN.md` for how to present findings and where to checkpoint.
+
 This skill is self-contained. Its methodology docs and templates ship under `reference/` (relative to this skill directory), so the paths below resolve no matter which repo you run Humify on.
 
 ## Operating Rules
@@ -26,14 +28,17 @@ This skill is self-contained. Its methodology docs and templates ship under `ref
 
 ## Workflow
 
-1. Read `reference/MODEL-CONTEXT-PACKET.md` to choose the right context order.
-2. For normal audits, read `reference/HUMIFY.md`, `reference/HUMIFY-AI-INSTRUCTIONS.md`, `reference/EXAMPLES.md`, `reference/STELLAR-CODEBASES.md`, `reference/STEELMAN-PASS.md`, and `reference/templates/HUMIFY-AUDIT.template.md`.
-3. For massive repos, also read `reference/MASSIVE-CODEBASE-WORKFLOW.md` and the map, heatmap, and plan templates in `reference/templates/`.
-4. For refactor planning, read `reference/REFACTOR-PLAN-PROTOCOL.md` and `reference/templates/HUMIFY-PLAN.template.md`.
-5. Produce artifacts in this order: `HUMIFY-MAP.md`, `HUMIFY-HEATMAP.md`, `HUMIFY-AUDIT.md`, `HUMIFY-PLAN.md` when triggered, and `HUMIFY-PATCHLOG.md` after edits.
-6. Run `reference/STEELMAN-PASS.md` before finalizing high-confidence claims, low-score plans, or massive-repo conclusions.
+Run this as a guided session. Before each stage, say in one line what you are about to do and why. After each stage, show and explain what you found, then check in. Follow `reference/GUIDED-RUN.md` for the presentation format and checkpoints.
 
-The standard user flow is: map the repo, exclude generated/vendor artifacts, score readability and refactor risk, identify machine-shaped or generated code, produce evidence-backed findings, produce a refactor plan if scores are low, gate refactor by repo cleanliness and explicit opt-in, run only approved no-commit slices, verify with tests, then summarize before/after behavior.
+1. Load context: read `reference/MODEL-CONTEXT-PACKET.md`, then the core docs it points to (`reference/HUMIFY.md`, `reference/HUMIFY-AI-INSTRUCTIONS.md`, `reference/EXAMPLES.md`, `reference/STELLAR-CODEBASES.md`, `reference/STEELMAN-PASS.md`) and the audit template `reference/templates/HUMIFY-AUDIT.template.md`.
+2. Map the repo, then present the lay of the land: what it is, entry points, what you excluded and why, and where you will look hardest. Save `HUMIFY-MAP.md` as a byproduct.
+3. Score the hotspots, then present the heatmap: each hot area with its score, confidence, and a one-line reason. For massive repos, first read `reference/MASSIVE-CODEBASE-WORKFLOW.md` and the map, heatmap, and plan templates.
+4. Audit the hotspots, then present each finding with file and line evidence and why it matters, plus the cleared items. Run `reference/STEELMAN-PASS.md` over the findings before presenting.
+5. Give the Refactor Readiness Verdict and the first thing you would do, then check in: offer a refactor plan, more detail, or stop. Do not continue without the user.
+6. If asked to plan, read `reference/REFACTOR-PLAN-PROTOCOL.md` and `reference/templates/HUMIFY-PLAN.template.md`, present the tests-first slices, explain the first safe slice, then check in before any edit.
+7. Refactor only after explicit opt-in and an open gate. Narrate each slice, keep it no-commit, show before and after, and verify.
+
+Produce the artifacts `HUMIFY-MAP.md`, `HUMIFY-HEATMAP.md`, `HUMIFY-AUDIT.md`, `HUMIFY-PLAN.md` when triggered, and `HUMIFY-PATCHLOG.md` after edits, but lead with the explanation in the chat.
 
 ## Refactor Gate
 

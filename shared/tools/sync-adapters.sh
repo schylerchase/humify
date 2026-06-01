@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SRC="$ROOT/shared"
 
 DOCS=(
+  GUIDED-RUN.md
   HUMIFY.md
   HUMIFY-VISION.md
   HUMIFY-OPERATOR.md
