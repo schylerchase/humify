@@ -1,0 +1,14 @@
+{
+  "name": "humify",
+  "owner": {
+    "name": "schylerchase",
+    "url": "https://github.com/schylerchase"
+  },
+  "plugins": [
+    {
+      "name": "humify",
+      "source": "./claude",
+      "description": "Readability-first framework for evidence-backed codebase audits and tests-first refactor planning."
+    }
+  ]
+}

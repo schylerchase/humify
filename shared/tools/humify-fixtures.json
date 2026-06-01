@@ -1,0 +1,118 @@
+{
+  "_comment": "Single source of truth for the Humify audit calibration rubric. Read by BOTH tools/humify-evaluate.ps1 (Windows/pwsh) and tools/humify_evaluate.py (cross-platform). Edit here only; do not duplicate the table into a script.",
+  "maxPerFixture": 3,
+  "readyRatio": 0.86,
+  "classifications": [
+    "Machine-shaped readability risk",
+    "High-risk refactor candidate",
+    "Excluded generated file",
+    "Needs targeted cleanup",
+    "Clean"
+  ],
+  "confidences": ["None", "Not applicable", "Low", "Medium", "High"],
+  "fixtures": [
+    {
+      "id": "clean",
+      "file": "clean-audit.md",
+      "requiredNeedles": ["No findings"],
+      "safeActionNeedles": ["Refactor required: No", "Refactor required | No"]
+    },
+    {
+      "id": "messy-human",
+      "file": "messy-human-audit.md",
+      "requiredNeedles": ["mixed", "responsibilities", "import"],
+      "safeActionNeedles": ["characterization", "tests before", "before changing persistence"]
+    },
+    {
+      "id": "machine-shaped",
+      "file": "machine-shaped-audit.md",
+      "requiredNeedles": ["vague names", "repetitive", "domain contract"],
+      "safeActionNeedles": ["tests", "domain contract", "normalizer"]
+    },
+    {
+      "id": "generated-ignore",
+      "file": "generated-ignore-audit.md",
+      "requiredNeedles": ["excluded", "generated"],
+      "safeActionNeedles": ["Refactor required: No", "Refactor required | No", "not score generated"],
+      "generatedExclusion": true
+    },
+    {
+      "id": "risky-refactor",
+      "file": "risky-refactor-audit.md",
+      "requiredNeedles": ["discount", "minimum-spend", "stacking"],
+      "safeActionNeedles": ["characterization", "before extraction", "before refactor", "after tests"]
+    },
+    {
+      "id": "framework-boilerplate",
+      "file": "framework-boilerplate-audit.md",
+      "requiredNeedles": ["framework", "boilerplate"],
+      "safeActionNeedles": ["Refactor required: No", "Refactor required | No", "Cleared Items"]
+    },
+    {
+      "id": "machine-shaped-no-comments",
+      "file": "machine-shaped-no-comments-audit.md",
+      "requiredNeedles": ["generic", "parallel arrays", "domain contract"],
+      "safeActionNeedles": ["characterization", "types", "before"]
+    },
+    {
+      "id": "generated-header-only",
+      "file": "generated-header-only-audit.md",
+      "requiredNeedles": ["generated", "excluded"],
+      "safeActionNeedles": ["Refactor required: No", "Refactor required | No", "not score"]
+    },
+    {
+      "id": "hand-edited-generated",
+      "file": "hand-edited-generated-audit.md",
+      "requiredNeedles": ["generated", "hand-edited", "regeneration"],
+      "safeActionNeedles": ["characterization", "adapter", "before"]
+    },
+    {
+      "id": "compatibility-wrapper",
+      "file": "compatibility-wrapper-audit.md",
+      "requiredNeedles": ["compatibility", "public API"],
+      "safeActionNeedles": ["Refactor required: No", "Refactor required | No", "Cleared Items"]
+    },
+    {
+      "id": "ugly-stable",
+      "file": "ugly-stable-audit.md",
+      "requiredNeedles": ["stable", "not worth refactoring"],
+      "safeActionNeedles": ["Refactor required: No", "Refactor required | No", "Cleared Items"]
+    },
+    {
+      "id": "bug-plus-readability",
+      "file": "bug-plus-readability-audit.md",
+      "requiredNeedles": ["bug", "separate finding", "normalization"],
+      "safeActionNeedles": ["fix", "tests", "separate"]
+    },
+    {
+      "id": "auth-risk",
+      "file": "auth-risk-audit.md",
+      "requiredNeedles": ["authorization", "permission", "fail-open"],
+      "safeActionNeedles": ["characterization", "security", "before"]
+    },
+    {
+      "id": "powershell-admin-risk",
+      "file": "powershell-admin-risk-audit.md",
+      "requiredNeedles": ["reboot", "admin", "operator"],
+      "safeActionNeedles": ["dry-run", "tests", "before"]
+    },
+    {
+      "id": "massive-cluster",
+      "file": "massive-cluster-audit.md",
+      "requiredNeedles": ["cluster", "multiple responsibilities", "golden"],
+      "safeActionNeedles": ["characterization", "cluster", "before"]
+    },
+    {
+      "id": "registry-drift",
+      "file": "registry-drift-audit.md",
+      "requiredNeedles": ["registry", "stale", "silent"],
+      "safeActionNeedles": ["characterization", "canonical", "before"]
+    },
+    {
+      "id": "high-trust-stale-data",
+      "file": "high-trust-stale-data-audit.md",
+      "requiredNeedles": ["stale", "verified", "freshness"],
+      "safeActionNeedles": ["display tests", "date", "before"]
+    }
+  ]
+}

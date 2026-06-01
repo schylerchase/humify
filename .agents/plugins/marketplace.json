@@ -1,0 +1,20 @@
+{
+  "name": "humify",
+  "interface": {
+    "displayName": "Humify"
+  },
+  "plugins": [
+    {
+      "name": "humify",
+      "source": {
+        "source": "local",
+        "path": "./codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

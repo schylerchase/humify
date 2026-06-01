@@ -1,0 +1,25 @@
+# Private run output and real-repo artifacts. Never commit these.
+private/
+.humify-runs/
+
+# Local scratch output from calibration and experiments.
+actual/
+actual-plans/
+
+# Local secrets and environment files should never be part of Humify examples.
+.env
+.env.*
+*.secret
+*.secrets
+secrets/
+
+# Optional local newline-delimited privacy scan denylist.
+.humify-private-tokens.txt
+
+# Local agent/editor config can name machines, users, or private tooling.
+# Ignore in-repo so the privacy guarantee does not rely on a contributor's global ignore.
+.claude/
+
+# Python bytecode cache from the cross-platform tooling.
+__pycache__/
+*.pyc

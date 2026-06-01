@@ -1,0 +1,84 @@
+{
+  "_comment": "Single source of truth for the Humify refactor-plan calibration rubric. Read by BOTH tools/humify-evaluate-plans.ps1 and tools/humify_evaluate_plans.py. Edit here only.",
+  "maxPerPlan": 3,
+  "readyRatio": 0.86,
+  "shapeNeedles": [
+    "## Score Trigger",
+    "## Primary Risk",
+    "## First Safe Slice",
+    "## Non-Negotiable Gates",
+    "## Implementation Units",
+    "## Steelman Check"
+  ],
+  "unitHeaderPattern": "##\\s+Unit\\s+\\d+\\.",
+  "unitFieldNeedles": ["Goal:", "Findings addressed:", "Tests:", "Verification:", "Rollback:"],
+  "testsFirstNeedles": ["characterization", "behavior-preserving", "before extraction", "before movement", "before readability changes"],
+  "plans": [
+    {
+      "id": "messy-human",
+      "file": "messy-human-plan.md",
+      "requiredNeedles": ["import", "characterization", "validation", "persistence"],
+      "firstSliceNeedles": ["Capture customer import behavior", "characterization tests", "Protect current import"]
+    },
+    {
+      "id": "machine-shaped",
+      "file": "machine-shaped-plan.md",
+      "requiredNeedles": ["domain contract", "characterization", "any", "normalization"],
+      "firstSliceNeedles": ["Capture current generic processing behavior", "field defaults", "metadata"]
+    },
+    {
+      "id": "risky-refactor",
+      "file": "risky-refactor-plan.md",
+      "requiredNeedles": ["discount", "characterization", "stacking", "minimum"],
+      "firstSliceNeedles": ["Capture current discount behavior", "pricing semantics", "before readability changes"]
+    },
+    {
+      "id": "machine-shaped-no-comments",
+      "file": "machine-shaped-no-comments-plan.md",
+      "requiredNeedles": ["parallel arrays", "characterization", "domain contract"],
+      "firstSliceNeedles": ["Capture current formatter behavior", "parallel array", "before naming"]
+    },
+    {
+      "id": "hand-edited-generated",
+      "file": "hand-edited-generated-plan.md",
+      "requiredNeedles": ["generated", "hand-edited", "adapter"],
+      "firstSliceNeedles": ["Capture patched client behavior", "regeneration", "before"]
+    },
+    {
+      "id": "bug-plus-readability",
+      "file": "bug-plus-readability-plan.md",
+      "requiredNeedles": ["bug", "normalization", "separate"],
+      "firstSliceNeedles": ["Lock failing email normalization behavior", "bug fix", "before cleanup"]
+    },
+    {
+      "id": "auth-risk",
+      "file": "auth-risk-plan.md",
+      "requiredNeedles": ["authorization", "security", "fail-open"],
+      "firstSliceNeedles": ["Capture authorization outcomes", "deny", "before"]
+    },
+    {
+      "id": "powershell-admin-risk",
+      "file": "powershell-admin-risk-plan.md",
+      "requiredNeedles": ["reboot", "dry-run", "operator"],
+      "firstSliceNeedles": ["Capture admin script safety behavior", "dry-run", "before"]
+    },
+    {
+      "id": "massive-cluster",
+      "file": "massive-cluster-plan.md",
+      "requiredNeedles": ["cluster", "golden", "workflow"],
+      "firstSliceNeedles": ["Capture report workflow output", "golden", "before"]
+    },
+    {
+      "id": "registry-drift",
+      "file": "registry-drift-plan.md",
+      "requiredNeedles": ["registry", "characterization", "canonical"],
+      "firstSliceNeedles": ["Capture registry drift behavior", "active input", "before"]
+    },
+    {
+      "id": "high-trust-stale-data",
+      "file": "high-trust-stale-data-plan.md",
+      "requiredNeedles": ["freshness", "stale", "verified"],
+      "firstSliceNeedles": ["Capture pricing freshness display behavior", "current", "before"]
+    }
+  ]
+}
