@@ -27,23 +27,42 @@ Humify produces a small set of evidence-backed artifacts. Each one starts from a
 
 ## Install
 
-There is no package to install. Clone the whole repo and point your agent at the adapter for your platform. Both adapters reference the shared core through relative paths, so keep the repo intact.
+Humify installs as a plugin from this repo's marketplace. Each adapter is self-contained, so install whichever host you use, or both. They do not depend on each other or on the rest of the repo.
+
+### Claude Code
 
 ```bash
-git clone https://github.com/schylerchase/humify.git
+claude plugin marketplace add schylerchase/humify
+claude plugin install humify@humify
 ```
+
+Or from inside Claude Code: `/plugin marketplace add schylerchase/humify`, then `/plugin install humify@humify`.
 
 ### Codex
 
-The Codex adapter is a plugin defined by `codex/.codex-plugin/plugin.json`, with the skill at `codex/skills/humify/SKILL.md`. The agent interface lives in `codex/skills/humify/agents/openai.yaml`, which allows implicit invocation, so Codex can run Humify without an explicit token.
+```bash
+codex plugin marketplace add schylerchase/humify --ref main --sparse .agents/plugins --sparse codex
+codex plugin add humify@humify
+```
 
-Point Codex at the `codex/` directory and load the plugin.
+Or from inside Codex: open `/plugins`, add `schylerchase/humify`, and install Humify.
 
-### Claude
+## Updating
 
-The Claude adapter is a plugin defined by `claude/.claude-plugin/plugin.json`, with the skill at `claude/skills/humify/SKILL.md`. Claude auto-discovers the skill from that path, so there is no skills field to configure.
+Plugins do not auto-update. The Claude adapter checks this repo about once a day and prints a notice when a newer version is available. Codex does not, so check it yourself.
 
-Point Claude or Claude Code at the `claude/` directory.
+To update:
+
+```bash
+# Claude Code
+claude plugin marketplace update humify
+claude plugin update humify@humify
+
+# Codex
+codex plugin marketplace upgrade humify
+```
+
+Restart the host after updating so the refreshed docs load.
 
 ## Use it
 
@@ -177,11 +196,13 @@ A passing self-test reports that identity wiring holds and that the evaluator fa
 ## Repository layout
 
 ```text
-shared/   platform-agnostic core, about 90 percent of the content: docs, templates, prompts, fixtures, expected baselines, tools
-codex/    Codex adapter: .codex-plugin/plugin.json, skills/humify/SKILL.md, skills/humify/agents/openai.yaml
-claude/   Claude adapter: .claude-plugin/plugin.json, skills/humify/SKILL.md
+shared/   dev source of truth and calibration pack: docs, templates, fixtures, expected baselines, evaluators. Not shipped in an installed plugin.
+codex/    Codex adapter, a self-contained plugin: .codex-plugin/plugin.json, skills/humify/SKILL.md, skills/humify/reference/ (bundled docs), skills/humify/agents/openai.yaml
+claude/   Claude adapter, a self-contained plugin: .claude-plugin/plugin.json, skills/humify/SKILL.md, skills/humify/reference/ (bundled docs), hooks/ + scripts/ (update notifier)
 actual/   stub directory for your audit outputs before scoring (contents git-ignored)
 ```
+
+Each adapter's `reference/` is generated from `shared/` by `shared/tools/sync-adapters.sh`. To change the methodology, edit the docs in `shared/`, run the sync script, bump the plugin version, and commit. Installed plugins carry their own copy and never read `shared/`.
 
 Key documents in `shared/`:
 

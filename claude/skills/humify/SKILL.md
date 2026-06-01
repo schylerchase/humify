@@ -7,7 +7,9 @@ description: Run the Humify codebase rehabilitation workflow. Use when the user 
 
 Use Humify to turn messy codebases into evidence-backed audit artifacts and safe refactor slices.
 
-Claude tool mapping: use `Read`/`Grep`/`Glob` to map and read code, `Bash` to capture git state and run calibration, and `Edit`/`Write` only after the refactor gate opens.
+Claude tool mapping: use `Read`/`Grep`/`Glob` to map and read code, `Bash` to capture git state, and `Edit`/`Write` only after the refactor gate opens.
+
+This skill is self-contained. Its methodology docs and templates ship under `${CLAUDE_SKILL_DIR}/reference/`, so the paths below resolve no matter which repo you run Humify on.
 
 ## Operating Rules
 
@@ -26,12 +28,12 @@ Claude tool mapping: use `Read`/`Grep`/`Glob` to map and read code, `Bash` to ca
 
 ## Workflow
 
-1. Read `../../../shared/MODEL-CONTEXT-PACKET.md` to choose the right context order.
-2. For normal audits, read `../../../shared/HUMIFY.md`, `../../../shared/HUMIFY-AI-INSTRUCTIONS.md`, `../../../shared/EXAMPLES.md`, `../../../shared/STELLAR-CODEBASES.md`, `../../../shared/STEELMAN-PASS.md`, and `../../../shared/templates/HUMIFY-AUDIT.template.md`.
-3. For massive repos, also read `../../../shared/MASSIVE-CODEBASE-WORKFLOW.md` and the map, heatmap, and plan templates.
-4. For refactor planning, read `../../../shared/REFACTOR-PLAN-PROTOCOL.md` and `../../../shared/templates/HUMIFY-PLAN.template.md`.
+1. Read `${CLAUDE_SKILL_DIR}/reference/MODEL-CONTEXT-PACKET.md` to choose the right context order.
+2. For normal audits, read `${CLAUDE_SKILL_DIR}/reference/HUMIFY.md`, `${CLAUDE_SKILL_DIR}/reference/HUMIFY-AI-INSTRUCTIONS.md`, `${CLAUDE_SKILL_DIR}/reference/EXAMPLES.md`, `${CLAUDE_SKILL_DIR}/reference/STELLAR-CODEBASES.md`, `${CLAUDE_SKILL_DIR}/reference/STEELMAN-PASS.md`, and `${CLAUDE_SKILL_DIR}/reference/templates/HUMIFY-AUDIT.template.md`.
+3. For massive repos, also read `${CLAUDE_SKILL_DIR}/reference/MASSIVE-CODEBASE-WORKFLOW.md` and the map, heatmap, and plan templates in `${CLAUDE_SKILL_DIR}/reference/templates/`.
+4. For refactor planning, read `${CLAUDE_SKILL_DIR}/reference/REFACTOR-PLAN-PROTOCOL.md` and `${CLAUDE_SKILL_DIR}/reference/templates/HUMIFY-PLAN.template.md`.
 5. Produce artifacts in this order: `HUMIFY-MAP.md`, `HUMIFY-HEATMAP.md`, `HUMIFY-AUDIT.md`, `HUMIFY-PLAN.md` when triggered, and `HUMIFY-PATCHLOG.md` after edits.
-6. Run `../../../shared/STEELMAN-PASS.md` before finalizing high-confidence claims, low-score plans, or massive-repo conclusions.
+6. Run `${CLAUDE_SKILL_DIR}/reference/STEELMAN-PASS.md` before finalizing high-confidence claims, low-score plans, or massive-repo conclusions.
 
 The standard user flow is: map the repo, exclude generated/vendor artifacts, score readability and refactor risk, identify machine-shaped or generated code, produce evidence-backed findings, produce a refactor plan if scores are low, gate refactor by repo cleanliness and explicit opt-in, run only approved no-commit slices, verify with tests, then summarize before/after behavior.
 
@@ -50,17 +52,6 @@ The first slice should usually add characterization tests or golden-output check
 
 If the repo is dirty, the refactor gate is closed unless the user explicitly accepts the dirty tree as the baseline. Do not stash, revert, clean, commit, or rearrange the user's existing work as part of opening the gate.
 
-## Calibration
+## Calibration and source
 
-For fixture calibration, follow `../../../shared/HUMIFY-TESTING.md`.
-
-Do not read `../../../shared/expected/` or `../../../shared/expected-plans/` until after actual outputs have been written, unless debugging a failed calibration run.
-
-Use (cross-platform Python):
-
-```bash
-python3 shared/tools/humify_evaluate.py
-python3 shared/tools/humify_evaluate_plans.py
-```
-
-For self-tests, run `python3 shared/tools/humify_selftest.py`; it must report `SELF-TEST PASSED`. See `../../../README.md` for expected scores.
+The calibration pack (fixtures, expected baselines, and the Python and PowerShell evaluators) lives in the Humify source repository, not in the installed plugin. To calibrate the framework or contribute, clone `github.com/schylerchase/humify` and use the tools under `shared/tools/`.
