@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"humify-ng/internal/layout"
@@ -22,9 +23,14 @@ const (
 )
 
 type options struct {
-	path string
-	json bool
+	path   string
+	root   string
+	target string
+	godLOC int
+	json   bool
 }
+
+const defaultGodLOC = 1500
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -35,6 +41,8 @@ func run(args []string) int {
 	switch cmd {
 	case "status":
 		return cmdStatus(opts)
+	case "heatmap":
+		return cmdHeatmap(opts)
 	case "", "help", "-h", "--help":
 		printUsage()
 		return exitOK
@@ -46,7 +54,7 @@ func run(args []string) int {
 }
 
 func parseArgs(args []string) (string, options) {
-	opts := options{path: "."}
+	opts := options{path: ".", godLOC: defaultGodLOC}
 	var cmd string
 	for _, a := range args {
 		switch {
@@ -54,6 +62,14 @@ func parseArgs(args []string) (string, options) {
 			opts.json = true
 		case strings.HasPrefix(a, "--path="):
 			opts.path = strings.TrimPrefix(a, "--path=")
+		case strings.HasPrefix(a, "--root="):
+			opts.root = strings.TrimPrefix(a, "--root=")
+		case strings.HasPrefix(a, "--target="):
+			opts.target = strings.TrimPrefix(a, "--target=")
+		case strings.HasPrefix(a, "--god-loc="):
+			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--god-loc=")); err == nil && n > 0 {
+				opts.godLOC = n
+			}
 		case cmd == "" && !strings.HasPrefix(a, "-"):
 			cmd = a
 		}
@@ -132,15 +148,18 @@ func pct(n, total int) string {
 }
 
 func printUsage() {
-	fmt.Println(`humify-ng — massive-codebase untangler (stage 1: status)
+	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-2)
 
 usage:
-  humify status [--path=DIR] [--json]
+  humify status  [--path=DIR] [--json]
+  humify heatmap --target=DIR [--root=DIR] [--god-loc=N] [--json]
 
-status derives each area's lifecycle stage from on-disk artifacts under
-.humify/areas/ — nothing is stored, so a reset loses no progress. Exit code:
-  0  clean
-  1  not a humify project (no .humify/ found)
-  2  drift: an area is audit-incomplete (fragments exist but AUDIT.md
-     never gathered them) — the failure that stranded the azure run.`)
+status   derive each area's lifecycle stage from on-disk artifacts under
+         .humify/areas/. Nothing is stored, so a reset loses no progress.
+heatmap  scan a target codebase, decompose into areas, build the dependency
+         DAG, compute parallel waves, score risk, and bootstrap .humify/
+         (HEATMAP.md, area scaffold, intel/areas.json) under --root (cwd).
+
+status exit codes:
+  0  clean   1  not a humify project   2  drift (an area is audit-incomplete)`)
 }

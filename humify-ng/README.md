@@ -2,19 +2,23 @@
 
 A massive-codebase untangler that **owns its orchestration loop in deterministic code**. The agent is a worker the binary calls — not the orchestrator — so the fan-out→gather→verify discipline can't drift. Design rationale and full roadmap: [`../HUMIFY-NG-ARCHITECTURE.md`](../HUMIFY-NG-ARCHITECTURE.md).
 
-## Status: stage 1 — `status` (disk contract)
+## Status: stages 1–2 (deterministic core, no agents)
 
-Implemented: the `.humify/` on-disk contract and `humify status`, which **derives** each area's pipeline stage by scanning artifacts. Nothing is stored, so a crash/reset loses no progress (ported from GSD's `roadmap.cjs` cascade).
+- **`humify status`** — derives each area's pipeline stage by scanning `.humify/` artifacts. Nothing is stored, so a crash/reset loses no progress (ported from GSD's `roadmap.cjs` cascade).
+- **`humify heatmap`** — scans a target codebase, decomposes it into areas (top-level dirs + god-files split out), builds the dependency DAG, partitions areas into dependency-first **waves** via Tarjan SCC + condensation topo-sort (cycles surfaced, not crashed on), scores risk mechanically, and bootstraps `.humify/` (`HEATMAP.md`, area scaffold, `intel/areas.json`).
 
-Not yet built: `map`, `heatmap`, `audit`, `plan`, `execute`, `patchlog` (stages 2–7).
+Not yet built: `map`, `audit` (the consolidate/verify stage — the actual humify fix), `plan`, `execute`, `patchlog`.
 
 ## Build & run
 
 ```sh
 go build -o humify.exe .
-./humify.exe status [--path=DIR] [--json]
+./humify.exe heatmap --target=DIR [--root=DIR] [--god-loc=N] [--json]
+./humify.exe status  [--path=DIR] [--json]
 go test ./...
 ```
+
+Verified on a real 108-file codebase: 12 areas, 2 waves, 1 cycle cluster, god-files (1.5k–3.8k LOC) correctly surfaced as the top risk areas.
 
 ## The derived state cascade
 
