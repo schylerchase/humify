@@ -37,11 +37,17 @@ func TestDeriveCascade(t *testing.T) {
 		},
 		{
 			"patched: PATCHLOG covers id",
-			[]string{"01-01-PLAN.md", "01-01-SUMMARY.md"}, "", "- 01-core done", "01-core", Patched,
+			[]string{"01-01-PLAN.md", "01-01-SUMMARY.md"}, "", "- 01-core", "01-core", Patched,
 		},
 		{
 			"word boundary: 01-core-utils in AUDIT must not satisfy 01-core",
 			[]string{"01-AUDIT-fragment.json"}, "## 01-core-utils mapped", "", "01-core", AuditIncomplete,
+		},
+		{
+			"fail-open guard: a covered area's finding naming a pending id in its file path must not cover the pending area",
+			[]string{"01-AUDIT-fragment.json"},
+			"## Areas consolidated\n- 09-other\n\n## Blocker findings (1)\n- [09-other] 01-core/handler.go:1 — bug (source: 09-other)",
+			"", "01-core", AuditIncomplete,
 		},
 	}
 	for _, tc := range cases {

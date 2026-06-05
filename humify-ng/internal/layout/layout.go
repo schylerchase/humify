@@ -55,6 +55,17 @@ func AuditFile(root string) string { return filepath.Join(root, Dir, "AUDIT.md")
 // PatchlogFile returns the path to .humify/PATCHLOG.md.
 func PatchlogFile(root string) string { return filepath.Join(root, Dir, "PATCHLOG.md") }
 
+// ConflictsFile returns the path to .humify/CONFLICTS.md.
+func ConflictsFile(root string) string { return filepath.Join(root, Dir, "CONFLICTS.md") }
+
+// TmpDir returns .humify/tmp, home of transient fan-in state (the manifest).
+func TmpDir(root string) string { return filepath.Join(root, Dir, "tmp") }
+
+// AreaFragment returns the conventional audit-fragment path for an area id.
+func AreaFragment(root, areaID string) string {
+	return filepath.Join(AreasDir(root), areaID, areaID+"-AUDIT-fragment.json")
+}
+
 // DiscoverAreas returns the area directory names under .humify/areas, sorted.
 // A missing areas directory is not an error; it yields no areas.
 func DiscoverAreas(root string) ([]string, error) {

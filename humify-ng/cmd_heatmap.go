@@ -10,6 +10,7 @@ import (
 	"humify-ng/internal/graph"
 	"humify-ng/internal/heatmap"
 	"humify-ng/internal/layout"
+	"humify-ng/internal/manifest"
 	"humify-ng/internal/output"
 	"humify-ng/internal/scan"
 )
@@ -71,10 +72,16 @@ func writeProject(root, target string, scores []heatmap.Score, g graph.Result, i
 	if err := os.MkdirAll(intelDir, 0o755); err != nil {
 		return err
 	}
+	var expected []manifest.Entry
 	for _, a := range in.Areas {
 		if err := os.MkdirAll(filepath.Join(layout.AreasDir(root), a.ID), 0o755); err != nil {
 			return err
 		}
+		rel := filepath.Join(layout.Dir, "areas", a.ID, a.ID+"-AUDIT-fragment.json")
+		expected = append(expected, manifest.Entry{AreaID: a.ID, Path: rel})
+	}
+	if err := manifest.Write(root, manifest.Manifest{Fragments: expected}); err != nil {
+		return err
 	}
 	md := heatmap.RenderMarkdown(target, scores, g, in.Files)
 	if err := os.WriteFile(filepath.Join(layout.HumifyDir(root), "HEATMAP.md"), []byte(md), 0o644); err != nil {

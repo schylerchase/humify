@@ -110,43 +110,30 @@ func classifyFile(name string, c *counts) {
 	}
 }
 
-// covers reports whether a consolidated doc references areaID as a whole
-// token, so "01-core" does not match "01-core-utils" (mirrors GSD's
-// word-boundary requirement matching, e.g. REQ-1 != REQ-10).
+// covers reports whether a consolidated doc DECLARES coverage of areaID — a
+// list item or heading whose sole content is the id (e.g. "- 01-core" or
+// "## 01-core"). It deliberately does NOT match an id embedded in prose such as
+// a finding's file path ("01-core/handler.go") or title. Without this anchor a
+// COVERED area's finding text could name a PENDING area's id and falsely flip
+// that pending area to audited — a fail-open that defeats drift detection.
 func covers(doc, areaID string) bool {
 	if doc == "" || areaID == "" {
 		return false
 	}
 	for _, line := range strings.Split(doc, "\n") {
-		if hasToken(line, areaID) {
+		if lineNamesArea(line, areaID) {
 			return true
 		}
 	}
 	return false
 }
 
-func hasToken(line, token string) bool {
-	for idx := strings.Index(line, token); idx >= 0; {
-		leftOK := idx == 0 || !isWordByte(line[idx-1])
-		rightPos := idx + len(token)
-		rightOK := rightPos >= len(line) || !isWordByte(line[rightPos])
-		if leftOK && rightOK {
-			return true
-		}
-		next := strings.Index(line[idx+1:], token)
-		if next < 0 {
-			return false
-		}
-		idx += next + 1
+func lineNamesArea(line, areaID string) bool {
+	s := strings.TrimSpace(line)
+	for _, marker := range []string{"- ", "* ", "## ", "# "} {
+		s = strings.TrimPrefix(s, marker)
 	}
-	return false
-}
-
-func isWordByte(b byte) bool {
-	return b == '_' || b == '-' ||
-		(b >= '0' && b <= '9') ||
-		(b >= 'a' && b <= 'z') ||
-		(b >= 'A' && b <= 'Z')
+	return strings.TrimSpace(s) == areaID
 }
 
 func isDir(p string) bool {

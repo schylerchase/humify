@@ -43,6 +43,8 @@ func run(args []string) int {
 		return cmdStatus(opts)
 	case "heatmap":
 		return cmdHeatmap(opts)
+	case "consolidate":
+		return cmdConsolidate(opts)
 	case "", "help", "-h", "--help":
 		printUsage()
 		return exitOK
@@ -151,14 +153,18 @@ func printUsage() {
 	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-2)
 
 usage:
-  humify status  [--path=DIR] [--json]
-  humify heatmap --target=DIR [--root=DIR] [--god-loc=N] [--json]
+  humify status      [--path=DIR] [--json]
+  humify heatmap     --target=DIR [--root=DIR] [--god-loc=N] [--json]
+  humify consolidate [--root=DIR] [--json]
 
-status   derive each area's lifecycle stage from on-disk artifacts under
-         .humify/areas/. Nothing is stored, so a reset loses no progress.
-heatmap  scan a target codebase, decompose into areas, build the dependency
-         DAG, compute parallel waves, score risk, and bootstrap .humify/
-         (HEATMAP.md, area scaffold, intel/areas.json) under --root (cwd).
+status       derive each area's lifecycle stage from on-disk artifacts under
+             .humify/areas/. Nothing is stored, so a reset loses no progress.
+heatmap      scan a target codebase, decompose into areas, build the dependency
+             DAG, compute parallel waves, score risk, and bootstrap .humify/
+             (HEATMAP.md, area scaffold, intel, AUDIT_MANIFEST) under --root.
+consolidate  gather all audit fragments named in the manifest into one AUDIT.md
+             (dedup, cycle-detect, bucket conflicts), fail-closed on any pending
+             or invalid fragment. Writes AUDIT.md + CONFLICTS.md.
 
 status exit codes:
   0  clean   1  not a humify project   2  drift (an area is audit-incomplete)`)
