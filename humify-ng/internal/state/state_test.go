@@ -63,6 +63,18 @@ func TestDeriveCascade(t *testing.T) {
 	}
 }
 
+// Regression: covers() must match a real coverage row but not a structural
+// heading the renderer itself emits (e.g. "## Areas consolidated").
+func TestCoversIgnoresHeadings(t *testing.T) {
+	doc := "## Areas consolidated\n- 01-core\n\n## Blocker findings (1)\n"
+	if covers(doc, "Areas consolidated") || covers(doc, "Blocker findings (1)") {
+		t.Fatal("covers matched a structural heading")
+	}
+	if !covers(doc, "01-core") {
+		t.Fatal("covers failed to match a real coverage row")
+	}
+}
+
 func TestDeriveNoDirectory(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "does-not-exist")
 	if got := Derive(missing, "01-core", "", "").Status; got != NoDirectory {

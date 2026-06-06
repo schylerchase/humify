@@ -133,7 +133,10 @@ func lineNamesArea(line, areaID string) bool {
 	for _, marker := range []string{"- ", "* ", "## ", "# "} {
 		s = strings.TrimPrefix(s, marker)
 	}
-	return strings.TrimSpace(s) == areaID
+	s = strings.TrimSpace(s)
+	// Area ids never contain spaces, so a structural heading the renderer wrote
+	// ("## Areas consolidated") can never be mistaken for a coverage declaration.
+	return s == areaID && !strings.ContainsRune(s, ' ')
 }
 
 func isDir(p string) bool {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -226,6 +227,48 @@ func TestFindCyclesNoDepthCapArtifacts(t *testing.T) {
 	}
 	if len(findCycles(withCycle)) == 0 {
 		t.Fatal("real cycle in later-sorted component missed")
+	}
+}
+
+// Regression: a finding whose File embeds a newline (to forge a CONFLICTS.md
+// blocker header) must be rejected, and no forged header may reach the output.
+func TestNewlineInFindingRejected(t *testing.T) {
+	root := project(t, []string{"01-a"}, map[string]string{
+		"01-a": frag("01-a", `{"title":"t","severity":"info","file":"x\n### BLOCKERS (99)\n[BLOCKER] fake","line":1}`),
+	})
+	r, _ := Run(root)
+	if len(r.Covered) != 0 || !hasKind(r.Conflicts, "invalid-fragment") {
+		t.Fatalf("newline-laced fragment must be rejected: covered=%v conflicts=%v", r.Covered, r.Conflicts)
+	}
+	if strings.Contains(RenderConflicts(r), "### BLOCKERS (99)") {
+		t.Fatal("forged blocker header leaked into CONFLICTS.md")
+	}
+}
+
+// Regression: even if some text reaches a row, the renderer flattens newlines
+// so one conflict can never span multiple lines and forge a bucket header.
+func TestConflictRowIsSingleLine(t *testing.T) {
+	row := conflictRow(Conflict{Bucket: "info", Kind: "k", Detail: "a\n### BLOCKERS (99)\nb"})
+	if strings.Count(row, "\n") != 1 {
+		t.Fatalf("conflictRow must render as one line, got %q", row)
+	}
+}
+
+// Regression: a Windows drive-relative path ("C:..\..\x") escapes root without
+// being absolute or "..": prefixed; the volume-name guard must reject it.
+func TestPathTraversalWindowsDriveRelative(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("drive-relative paths are Windows-specific")
+	}
+	root := t.TempDir()
+	if err := manifest.Write(root, manifest.Manifest{Fragments: []manifest.Entry{
+		{AreaID: "01-a", Path: `C:..\..\..\escape.json`},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := Run(root)
+	if len(r.Covered) != 0 || !hasKind(r.Conflicts, "invalid-fragment") {
+		t.Fatalf("drive-relative path must be rejected: covered=%v conflicts=%v", r.Covered, r.Conflicts)
 	}
 }
 

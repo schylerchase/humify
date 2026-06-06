@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Finding is one audit observation about a specific location.
@@ -72,6 +73,11 @@ func (f Fragment) Validate() error {
 		}
 		if !ValidSeverity(fd.Severity) {
 			return fmt.Errorf("%s finding %q: invalid severity %q", f.AreaID, fd.Title, fd.Severity)
+		}
+		// Newlines in auditor-controlled text could forge headers/rows in the
+		// machine-parseable AUDIT.md / CONFLICTS.md output. Reject at the input.
+		if strings.ContainsAny(fd.Title, "\n\r") || strings.ContainsAny(fd.File, "\n\r") {
+			return fmt.Errorf("%s finding %q: title/file contains a newline", f.AreaID, strings.TrimSpace(fd.Title))
 		}
 	}
 	return nil

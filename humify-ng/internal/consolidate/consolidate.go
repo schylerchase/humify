@@ -132,14 +132,19 @@ func pendingConflict(area string, err error) Conflict {
 
 func loadValid(root string, e manifest.Entry) (fragment.Fragment, error) {
 	var frag fragment.Fragment
-	if e.Path == "" || filepath.IsAbs(e.Path) {
-		return frag, fmt.Errorf("manifest path must be relative, got %q", e.Path)
+	native := filepath.FromSlash(e.Path)
+	// A legitimate fragment path is relative, root-local, and carries no volume.
+	// The volume check stops Windows drive-relative escapes ("C:..\..\x") that
+	// are neither absolute nor "..": prefixed yet still resolve above root.
+	if e.Path == "" || filepath.IsAbs(native) || filepath.VolumeName(native) != "" {
+		return frag, fmt.Errorf("manifest path must be relative and root-local, got %q", e.Path)
 	}
-	clean := filepath.Clean(filepath.FromSlash(e.Path))
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	full := filepath.Join(root, filepath.Clean(native))
+	rel, relErr := filepath.Rel(root, full)
+	if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return frag, fmt.Errorf("manifest path escapes project root: %q", e.Path)
 	}
-	frag, err := fragment.Load(filepath.Join(root, clean))
+	frag, err := fragment.Load(full)
 	if err != nil {
 		return frag, err
 	}
