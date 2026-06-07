@@ -11,8 +11,11 @@ import (
 // prompt files written; an autonomous runner would additionally report spawned
 // and failed workers.
 type Outcome struct {
-	Runner  string   `json:"runner"`
-	Prompts []string `json:"prompts,omitempty"` // prompt paths written, relative to project root
+	Runner    string   `json:"runner"`
+	Prompts   []string `json:"prompts,omitempty"`   // prompt paths written, relative to project root
+	Spawned   int      `json:"spawned,omitempty"`   // agents actually run (spawn runner)
+	Succeeded int      `json:"succeeded,omitempty"` // agents whose fragment appeared and validated
+	Failed    []string `json:"failed,omitempty"`    // area ids with no valid fragment after their agent ran
 }
 
 // Runner turns an audit Plan into produced (or to-be-produced) fragments. The
@@ -35,21 +38,28 @@ func (DispatchRunner) Name() string { return "dispatch" }
 
 // Dispatch materializes the per-area prompt files under .humify/tmp/auditors/.
 func (DispatchRunner) Dispatch(p Plan) (Outcome, error) {
-	out := Outcome{Runner: "dispatch"}
+	prompts, err := writePrompts(p)
+	return Outcome{Runner: "dispatch", Prompts: prompts}, err
+}
+
+// writePrompts materializes one auditor prompt per pending area under
+// .humify/tmp/auditors/ and returns their root-relative paths. It is the single
+// definition of where audit prompts go, shared by every runner.
+func writePrompts(p Plan) ([]string, error) {
 	if len(p.Pending) == 0 {
-		return out, nil
+		return nil, nil
 	}
 	dir := filepath.Join(layout.TmpDir(p.Root), "auditors")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return out, err
+		return nil, err
 	}
+	var prompts []string
 	for _, j := range p.Pending {
-		body := RenderPrompt(j, p.Target)
 		dest := filepath.Join(p.Root, j.PromptPath)
-		if err := os.WriteFile(dest, []byte(body), 0o644); err != nil {
-			return out, err
+		if err := os.WriteFile(dest, []byte(RenderPrompt(j, p.Target)), 0o644); err != nil {
+			return prompts, err
 		}
-		out.Prompts = append(out.Prompts, j.PromptPath)
+		prompts = append(prompts, j.PromptPath)
 	}
-	return out, nil
+	return prompts, nil
 }

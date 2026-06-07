@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"humify-ng/internal/handoff"
 	"humify-ng/internal/layout"
@@ -29,9 +30,12 @@ type options struct {
 	target     string
 	runner     string
 	testCmd    string
+	agentCmd   string // spawn runner: agent command (prompt piped on stdin)
 	stage      string // second positional, e.g. `verify <stage>`
 	godLOC     int
 	maxReplans int
+	jobs       int           // spawn runner: max concurrent agents
+	timeout    time.Duration // spawn runner: per-agent wall-clock cap (0 → runner default)
 	json       bool
 }
 
@@ -75,7 +79,7 @@ func run(args []string) int {
 }
 
 func parseArgs(args []string) (string, options) {
-	opts := options{path: ".", godLOC: defaultGodLOC}
+	opts := options{path: ".", godLOC: defaultGodLOC, jobs: 4}
 	var cmd string
 	for _, a := range args {
 		switch {
@@ -91,6 +95,16 @@ func parseArgs(args []string) (string, options) {
 			opts.runner = strings.TrimPrefix(a, "--runner=")
 		case strings.HasPrefix(a, "--test-cmd="):
 			opts.testCmd = strings.TrimPrefix(a, "--test-cmd=")
+		case strings.HasPrefix(a, "--agent-cmd="):
+			opts.agentCmd = strings.TrimPrefix(a, "--agent-cmd=")
+		case strings.HasPrefix(a, "--jobs="):
+			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--jobs=")); err == nil && n > 0 {
+				opts.jobs = n
+			}
+		case strings.HasPrefix(a, "--timeout="):
+			if d, err := time.ParseDuration(strings.TrimPrefix(a, "--timeout=")); err == nil && d > 0 {
+				opts.timeout = d
+			}
 		case strings.HasPrefix(a, "--god-loc="):
 			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--god-loc=")); err == nil && n > 0 {
 				opts.godLOC = n

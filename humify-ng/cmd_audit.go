@@ -34,7 +34,7 @@ func cmdAudit(opts options) int {
 	if err != nil {
 		return fail(opts, auditReason(err), exitError, err.Error())
 	}
-	runner, err := selectRunner(opts.runner)
+	runner, err := selectRunner(opts)
 	if err != nil {
 		return fail(opts, "unknown_runner", exitError, err.Error())
 	}
@@ -45,16 +45,20 @@ func cmdAudit(opts options) int {
 	return emitAudit(opts, plan, out)
 }
 
-// selectRunner maps --runner to an implementation. Only dispatch ships today;
-// claude is a named seam that fails honestly rather than silently doing nothing.
-func selectRunner(name string) (audit.Runner, error) {
-	switch name {
+// selectRunner maps --runner to an implementation. dispatch only writes prompts;
+// spawn (alias: claude) also runs an operator-supplied --agent-cmd per area,
+// barriers on all of them, and reports which produced a valid fragment.
+func selectRunner(opts options) (audit.Runner, error) {
+	switch opts.runner {
 	case "", "dispatch":
 		return audit.DispatchRunner{}, nil
-	case "claude":
-		return nil, errors.New("runner \"claude\" (autonomous shell-out auditor) is not implemented yet; use --runner=dispatch")
+	case "spawn", "claude":
+		if opts.agentCmd == "" {
+			return nil, errors.New("the spawn runner requires --agent-cmd (the agent command; the prompt is piped to it on stdin)")
+		}
+		return audit.SpawnRunner{AgentCmd: opts.agentCmd, Jobs: opts.jobs, Timeout: opts.timeout}, nil
 	default:
-		return nil, fmt.Errorf("unknown runner %q (use: dispatch)", name)
+		return nil, fmt.Errorf("unknown runner %q (use: dispatch, spawn)", opts.runner)
 	}
 }
 
