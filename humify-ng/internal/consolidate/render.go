@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"humify-ng/internal/textutil"
 )
 
 // RenderAudit produces AUDIT.md. Only COVERED areas are listed (so `status`
@@ -53,7 +55,7 @@ func findingRow(m Merged) string {
 		loc = fmt.Sprintf("%s:%d", m.File, m.Line)
 	}
 	return fmt.Sprintf("- [%s] %s — %s (source: %s)\n",
-		oneLine(m.Sources[0]), oneLine(loc), oneLine(m.Title), oneLine(strings.Join(m.Sources, ", ")))
+		textutil.OneLine(m.Sources[0]), textutil.OneLine(loc), textutil.OneLine(m.Title), textutil.OneLine(strings.Join(m.Sources, ", ")))
 }
 
 // RenderConflicts produces CONFLICTS.md with fixed-format bucket counts so the
@@ -86,9 +88,9 @@ func conflictRow(c Conflict) string {
 	tag := strings.ToUpper(c.Bucket)
 	if len(c.Sources) > 0 {
 		return fmt.Sprintf("[%s] %s: %s [%s]\n",
-			tag, oneLine(c.Kind), oneLine(c.Detail), oneLine(strings.Join(c.Sources, ", ")))
+			tag, textutil.OneLine(c.Kind), textutil.OneLine(c.Detail), textutil.OneLine(strings.Join(c.Sources, ", ")))
 	}
-	return fmt.Sprintf("[%s] %s: %s\n", tag, oneLine(c.Kind), oneLine(c.Detail))
+	return fmt.Sprintf("[%s] %s: %s\n", tag, textutil.OneLine(c.Kind), textutil.OneLine(c.Detail))
 }
 
 func titleCase(s string) string {
@@ -96,10 +98,4 @@ func titleCase(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
-}
-
-// oneLine flattens any embedded newlines so a single rendered row can never
-// forge an extra line (e.g. a fake "### BLOCKERS (N)" header) in the output.
-func oneLine(s string) string {
-	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
 }

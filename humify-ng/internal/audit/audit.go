@@ -13,30 +13,19 @@
 package audit
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 
-	"humify-ng/internal/area"
 	"humify-ng/internal/fragment"
+	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/manifest"
 )
 
-// Sentinel errors for the fail-closed bootstrap gate.
-var (
-	ErrNoIntel    = errors.New("no intel/areas.json (run `humify heatmap` first)")
-	ErrNoManifest = errors.New("no AUDIT_MANIFEST.json (run `humify heatmap` first)")
-)
-
-// Intel is the subset of heatmap's decomposition the audit stage reads back.
-type Intel struct {
-	Target string      `json:"target"`
-	Areas  []area.Area `json:"areas"`
-	Waves  [][]string  `json:"waves"`
-}
+// ErrNoManifest is the fail-closed gate for a project that was never bootstrapped.
+var ErrNoManifest = errors.New("no AUDIT_MANIFEST.json (run `humify heatmap` first)")
 
 // Job is one auditor assignment: read exactly Files, write one fragment.
 type Job struct {
@@ -66,7 +55,7 @@ type Plan struct {
 // counted Done and never re-dispatched, so re-running after a partial scatter
 // only picks up the stragglers.
 func BuildPlan(root string) (Plan, error) {
-	in, err := loadIntel(root)
+	in, err := intel.Load(root)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -78,8 +67,8 @@ func BuildPlan(root string) (Plan, error) {
 		return Plan{}, err
 	}
 
-	byID := indexAreas(in.Areas)
-	wave := indexWaves(in.Waves)
+	byID := in.AreasByID()
+	wave := in.WaveOf()
 
 	plan := Plan{Root: root, Target: in.Target, Total: len(m.Fragments)}
 	seen := map[string]bool{}
@@ -124,43 +113,6 @@ func BuildPlan(root string) (Plan, error) {
 // promptPath is the conventional per-area prompt location, relative to root.
 func promptPath(areaID string) string {
 	return filepath.Join(layout.Dir, "tmp", "auditors", areaID+".prompt.md")
-}
-
-func loadIntel(root string) (Intel, error) {
-	var in Intel
-	b, err := os.ReadFile(intelFile(root))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return in, ErrNoIntel
-		}
-		return in, err
-	}
-	if err := json.Unmarshal(b, &in); err != nil {
-		return in, err
-	}
-	return in, nil
-}
-
-func intelFile(root string) string {
-	return filepath.Join(layout.HumifyDir(root), "intel", "areas.json")
-}
-
-func indexAreas(areas []area.Area) map[string]area.Area {
-	m := make(map[string]area.Area, len(areas))
-	for _, a := range areas {
-		m[a.ID] = a
-	}
-	return m
-}
-
-func indexWaves(waves [][]string) map[string]int {
-	m := map[string]int{}
-	for level, ids := range waves {
-		for _, id := range ids {
-			m[id] = level
-		}
-	}
-	return m
 }
 
 // fragmentDone reports whether an area's fragment already exists, parses, passes

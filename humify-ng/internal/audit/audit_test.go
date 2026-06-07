@@ -10,6 +10,7 @@ import (
 
 	"humify-ng/internal/area"
 	"humify-ng/internal/fragment"
+	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/manifest"
 )
@@ -25,17 +26,9 @@ func newProject(t *testing.T) string {
 	return root
 }
 
-func putIntel(t *testing.T, root string, in Intel) {
+func putIntel(t *testing.T, root string, in intel.Data) {
 	t.Helper()
-	dir := filepath.Join(layout.HumifyDir(root), "intel")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	b, err := json.MarshalIndent(in, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "areas.json"), b, 0o644); err != nil {
+	if err := intel.Write(root, in); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -96,7 +89,7 @@ func jobByID(p Plan, id string) (Job, bool) {
 
 func TestBuildPlanAllPending(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{
+	putIntel(t, root, intel.Data{
 		Target: "target",
 		Areas:  []area.Area{mkArea("01-a", "dir", "a", "a/x.go"), mkArea("02-b", "dir", "b", "b/y.go")},
 		Waves:  [][]string{{"01-a", "02-b"}},
@@ -127,7 +120,7 @@ func TestBuildPlanAllPending(t *testing.T) {
 
 func TestBuildPlanResumableSkipsValidFragment(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{
+	putIntel(t, root, intel.Data{
 		Target: "t",
 		Areas:  []area.Area{mkArea("01-a", "dir", "a", "a/x.go"), mkArea("02-b", "dir", "b", "b/y.go")},
 		Waves:  [][]string{{"01-a", "02-b"}},
@@ -149,7 +142,7 @@ func TestBuildPlanResumableSkipsValidFragment(t *testing.T) {
 
 func TestBuildPlanInvalidFragmentStaysPending(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{
+	putIntel(t, root, intel.Data{
 		Target: "t",
 		Areas:  []area.Area{mkArea("01-a", "dir", "a", "a/x.go")},
 		Waves:  [][]string{{"01-a"}},
@@ -170,7 +163,7 @@ func TestBuildPlanInvalidFragmentStaysPending(t *testing.T) {
 // also own that file, or two auditors double-cover it.
 func TestBuildPlanGodFileOwnershipDisjoint(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{
+	putIntel(t, root, intel.Data{
 		Target: "t",
 		Areas: []area.Area{
 			mkArea("01-app-core", "file", "src/app-core.js", "src/app-core.js"),
@@ -200,7 +193,7 @@ func TestBuildPlanGodFileOwnershipDisjoint(t *testing.T) {
 
 func TestBuildPlanDriftMissingFromIntel(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{
+	putIntel(t, root, intel.Data{
 		Target: "t",
 		Areas:  []area.Area{mkArea("01-a", "dir", "a", "a/x.go")},
 		Waves:  [][]string{{"01-a"}},
@@ -221,7 +214,7 @@ func TestBuildPlanDriftMissingFromIntel(t *testing.T) {
 
 func TestBuildPlanPendingSortedByWaveThenID(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{
+	putIntel(t, root, intel.Data{
 		Target: "t",
 		Areas: []area.Area{
 			mkArea("03-c", "dir", "c", "c/z.go"),
@@ -248,14 +241,14 @@ func TestBuildPlanPendingSortedByWaveThenID(t *testing.T) {
 func TestBuildPlanNoIntel(t *testing.T) {
 	root := newProject(t)
 	putManifest(t, root, "01-a")
-	if _, err := BuildPlan(root); !errors.Is(err, ErrNoIntel) {
-		t.Fatalf("err = %v, want ErrNoIntel", err)
+	if _, err := BuildPlan(root); !errors.Is(err, intel.ErrNotExist) {
+		t.Fatalf("err = %v, want intel.ErrNotExist", err)
 	}
 }
 
 func TestBuildPlanNoManifest(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{Target: "t", Areas: []area.Area{mkArea("01-a", "dir", "a", "a/x.go")}})
+	putIntel(t, root, intel.Data{Target: "t", Areas: []area.Area{mkArea("01-a", "dir", "a", "a/x.go")}})
 	if _, err := BuildPlan(root); !errors.Is(err, ErrNoManifest) {
 		t.Fatalf("err = %v, want ErrNoManifest", err)
 	}
@@ -265,7 +258,7 @@ func TestBuildPlanNoManifest(t *testing.T) {
 
 func TestDispatchRunnerWritesOnePromptPerPending(t *testing.T) {
 	root := newProject(t)
-	putIntel(t, root, Intel{
+	putIntel(t, root, intel.Data{
 		Target: "t",
 		Areas:  []area.Area{mkArea("01-a", "dir", "a", "a/x.go"), mkArea("02-b", "dir", "b", "b/y.go")},
 		Waves:  [][]string{{"01-a", "02-b"}},

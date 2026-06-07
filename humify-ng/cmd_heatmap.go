@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,22 +8,12 @@ import (
 	"humify-ng/internal/area"
 	"humify-ng/internal/graph"
 	"humify-ng/internal/heatmap"
+	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/manifest"
 	"humify-ng/internal/output"
 	"humify-ng/internal/scan"
 )
-
-// intel is the machine-readable decomposition written to .humify/intel/areas.json.
-type intel struct {
-	Target string          `json:"target"`
-	Files  int             `json:"source_files"`
-	Areas  []area.Area     `json:"areas"`
-	Edges  []graph.Edge    `json:"edges"`
-	Waves  [][]string      `json:"waves"`
-	Cycles [][]string      `json:"cycles"`
-	Scores []heatmap.Score `json:"scores"`
-}
 
 // cmdHeatmap scans a target codebase and bootstraps a .humify/ project:
 // decomposition -> dependency DAG -> waves -> risk scores -> HEATMAP.md +
@@ -32,6 +21,12 @@ type intel struct {
 func cmdHeatmap(opts options) int {
 	if opts.target == "" {
 		return fail(opts, "missing_target", exitError, "heatmap requires --target=DIR")
+	}
+	// Canonicalize the target once, at the single point it enters the system, so
+	// every downstream artifact and agent prompt records an absolute path rather
+	// than something relative to whatever cwd a later stage happens to run in.
+	if abs, err := filepath.Abs(opts.target); err == nil {
+		opts.target = abs
 	}
 	files, err := scan.WalkSource(opts.target)
 	if err != nil {
@@ -49,7 +44,7 @@ func cmdHeatmap(opts options) int {
 	if root == "" {
 		root = "."
 	}
-	in := intel{
+	in := intel.Data{
 		Target: opts.target, Files: len(files), Areas: areas,
 		Edges: edges, Waves: g.Waves, Cycles: g.Cycles, Scores: scores,
 	}
@@ -67,11 +62,7 @@ func areaIDs(areas []area.Area) []string {
 	return ids
 }
 
-func writeProject(root, target string, scores []heatmap.Score, g graph.Result, in intel) error {
-	intelDir := filepath.Join(layout.HumifyDir(root), "intel")
-	if err := os.MkdirAll(intelDir, 0o755); err != nil {
-		return err
-	}
+func writeProject(root, target string, scores []heatmap.Score, g graph.Result, in intel.Data) error {
 	var expected []manifest.Entry
 	for _, a := range in.Areas {
 		if err := os.MkdirAll(filepath.Join(layout.AreasDir(root), a.ID), 0o755); err != nil {
@@ -86,11 +77,7 @@ func writeProject(root, target string, scores []heatmap.Score, g graph.Result, i
 	if err := os.WriteFile(filepath.Join(layout.HumifyDir(root), "HEATMAP.md"), []byte(md), 0o644); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(in, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(intelDir, "areas.json"), b, 0o644)
+	return intel.Write(root, in)
 }
 
 func emitHeatmap(opts options, root string, scores []heatmap.Score, g graph.Result, files int) int {

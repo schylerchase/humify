@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"humify-ng/internal/audit"
+	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
 )
@@ -58,7 +59,7 @@ func selectRunner(name string) (audit.Runner, error) {
 
 func auditReason(err error) string {
 	switch {
-	case errors.Is(err, audit.ErrNoIntel):
+	case errors.Is(err, intel.ErrNotExist):
 		return "no_intel"
 	case errors.Is(err, audit.ErrNoManifest):
 		return "no_manifest"
