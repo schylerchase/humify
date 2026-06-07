@@ -59,9 +59,10 @@ type snap struct {
 	bootstrapped    bool
 	missing         int // manifest areas absent from intel (corruption)
 	auditPending    int // areas still needing an auditor
-	auditIncomplete int // fragments on disk not gathered into AUDIT.md
-	blockers        int // consolidation blockers
-	planPending     int // finding-bearing areas without an accepted plan
+	auditIncomplete int  // fragments on disk not gathered into AUDIT.md
+	conErr          bool // consolidate.Run failed (e.g. empty/unreadable manifest)
+	blockers        int  // consolidation blockers
+	planPending     int  // finding-bearing areas without an accepted plan
 	execDone        bool
 	unpatched       int // executed areas not yet in PATCHLOG.md
 }
@@ -94,7 +95,12 @@ func observe(root string) snap {
 		}
 	}
 
-	if con, cerr := consolidate.Run(root); cerr == nil {
+	// A consolidate.Run error in a bootstrapped project (e.g. ErrEmptyManifest)
+	// must NOT be swallowed: leaving the counters at zero would let Next fall all
+	// the way through to "done". Record it as a blocking condition instead.
+	if con, cerr := consolidate.Run(root); cerr != nil {
+		s.conErr = true
+	} else {
 		s.blockers = con.Blockers
 		for _, o := range plan.Observe(root, consolidate.FindingAreas(con)) {
 			if !o.Accepted() {
@@ -127,6 +133,9 @@ func Next(root string) Step {
 	case s.auditIncomplete > 0:
 		return Step{StageConsolidate, "humify consolidate", "audit_incomplete", false,
 			fmt.Sprintf("%d area(s) have fragments not yet gathered into AUDIT.md", s.auditIncomplete)}
+	case s.conErr:
+		return Step{StageConsolidate, "humify heatmap", "blocked", true,
+			"AUDIT_MANIFEST is empty or unreadable — re-run heatmap"}
 	case s.blockers > 0:
 		return Step{StageConsolidate, "humify audit", "blocked", true,
 			fmt.Sprintf("%d consolidation blocker(s) — re-audit the affected area(s)", s.blockers)}
@@ -156,15 +165,15 @@ func Check(root string, st Stage) StageResult {
 		return result(st, s.bootstrapped && s.missing == 0 && s.auditPending == 0,
 			fmt.Sprintf("%d area(s) pending an auditor", s.auditPending))
 	case StageConsolidate:
-		return result(st, s.auditIncomplete == 0 && s.blockers == 0,
-			fmt.Sprintf("%d not gathered, %d blocker(s)", s.auditIncomplete, s.blockers))
+		return result(st, s.bootstrapped && !s.conErr && s.auditIncomplete == 0 && s.blockers == 0,
+			consolidateDetail(s))
 	case StagePlan:
-		return result(st, s.planPending == 0,
+		return result(st, s.bootstrapped && !s.conErr && s.planPending == 0,
 			fmt.Sprintf("%d area(s) without an accepted plan", s.planPending))
 	case StageExecute:
-		return result(st, s.execDone, "planned slices still pending execution")
+		return result(st, s.bootstrapped && s.execDone, "planned slices still pending execution")
 	case StagePatchlog:
-		return result(st, s.unpatched == 0,
+		return result(st, s.bootstrapped && s.unpatched == 0,
 			fmt.Sprintf("%d executed area(s) not in PATCHLOG.md", s.unpatched))
 	default:
 		return StageResult{Stage: st, Pass: false, Reason: "unknown_stage", Detail: "unknown stage " + string(st)}
@@ -184,6 +193,17 @@ func bootstrapDetail(s snap) string {
 		return "not bootstrapped — run heatmap"
 	}
 	return fmt.Sprintf("%d manifest area(s) absent from intel", s.missing)
+}
+
+func consolidateDetail(s snap) string {
+	switch {
+	case !s.bootstrapped:
+		return "not bootstrapped — run heatmap"
+	case s.conErr:
+		return "AUDIT_MANIFEST empty or unreadable — re-run heatmap"
+	default:
+		return fmt.Sprintf("%d not gathered, %d blocker(s)", s.auditIncomplete, s.blockers)
+	}
 }
 
 // readFile is a best-effort read: a missing consolidated doc reads as empty,

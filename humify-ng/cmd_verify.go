@@ -11,16 +11,17 @@ import (
 
 // cmdVerify re-runs a stage's deterministic gate read-only, without doing the
 // stage's work. `humify verify <stage>` checks one stage; `humify verify` checks
-// every stage in order. Exit 0 when the checked gate(s) pass, 2 on any failure —
-// so CI or a wrapping loop can branch on a stage's completeness without trusting
-// an agent's self-report.
+// every stage in order. Exit 0 when the checked gate(s) pass, 2 on an incomplete
+// gate (so CI or a wrapping loop can branch on completeness without trusting an
+// agent's self-report), and 1 on a usage error (an unknown stage name).
 func cmdVerify(opts options) int {
 	root := resolveRoot(opts)
 	if opts.stage == "" {
 		// Stages before the first-incomplete one are genuinely complete; the
 		// first-incomplete one fails; stages after it are simply not reached yet
 		// (reporting them PASS would read as "done" when they are merely vacuous).
-		cutoff := stagePos(pipeline.Next(root).Stage)
+		nextStage := pipeline.Next(root).Stage
+		cutoff := stagePos(nextStage)
 		results := make([]pipeline.StageResult, 0, len(pipeline.Order))
 		for i, st := range pipeline.Order {
 			if i > cutoff {
@@ -29,7 +30,7 @@ func cmdVerify(opts options) int {
 			}
 			results = append(results, pipeline.Check(root, st))
 		}
-		return emitVerify(opts, results, pipeline.Next(root).Stage == pipeline.StageDone)
+		return emitVerify(opts, results, nextStage == pipeline.StageDone)
 	}
 	st, ok := parseStage(opts.stage)
 	if !ok {

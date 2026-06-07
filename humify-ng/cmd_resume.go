@@ -73,9 +73,13 @@ func nextVerb(s string) string {
 	return ""
 }
 
-// escalatedAreas returns areas that exhausted their replan budget and still lack
-// an accepted plan, read straight from the persisted loop state — no rerun of the
-// loop, no mutation.
+// escalatedAreas returns areas the plan loop would mark terminally stuck — budget
+// exhausted OR stalled — read straight from the persisted loop state, no rerun and
+// no mutation. It uses plan.Escalated (the same predicate Decide uses) and only
+// consults it where Decide would: an area with a failing check on disk (HasPlan +
+// HasCheck + blocking issues). An area merely awaiting its first check is not
+// escalated. Without the stall arm, resume would loop "run humify plan" forever on
+// an area that stalls below its replan cap.
 func escalatedAreas(root string) []string {
 	st, err := plan.Load(root)
 	if err != nil {
@@ -83,10 +87,15 @@ func escalatedAreas(root string) []string {
 	}
 	var esc []string
 	for id, as := range st.Areas {
-		if as.Replans < st.MaxReplans {
+		obs := plan.Observe(root, []string{id})
+		if len(obs) != 1 {
 			continue
 		}
-		if obs := plan.Observe(root, []string{id}); len(obs) == 1 && !obs[0].Accepted() {
+		o := obs[0]
+		if !o.HasPlan || !o.HasCheck || o.Issues == 0 {
+			continue // not in an escalation-decidable state (no failing check yet)
+		}
+		if plan.Escalated(as, st.MaxReplans, o.Issues) {
 			esc = append(esc, id)
 		}
 	}

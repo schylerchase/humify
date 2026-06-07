@@ -165,6 +165,34 @@ func TestNextCleanAuditIsDone(t *testing.T) {
 	mustNext(t, root, StageDone, "complete")
 }
 
+// TestCheckNotBootstrapped: no stage may report complete on a fresh project —
+// the later stages once passed vacuously because their gate counters were zero.
+func TestCheckNotBootstrapped(t *testing.T) {
+	root := t.TempDir()
+	for _, st := range Order {
+		if Check(root, st).Pass {
+			t.Fatalf("Check(%s) must fail on a non-bootstrapped project", st)
+		}
+	}
+}
+
+// TestNextEmptyManifestBlocks: a valid-but-empty manifest makes consolidate.Run
+// fail; that error must surface as blocked, not be swallowed into "done".
+func TestNextEmptyManifestBlocks(t *testing.T) {
+	root := t.TempDir()
+	writeIntel(t, root, []string{"01-a"}, [][]string{{"01-a"}})
+	if err := manifest.Write(root, manifest.Manifest{}); err != nil { // zero fragments
+		t.Fatal(err)
+	}
+	step := Next(root)
+	if step.Stage != StageConsolidate || !step.Blocked {
+		t.Fatalf("empty manifest must block at consolidate, got %+v", step)
+	}
+	if Check(root, StageConsolidate).Pass {
+		t.Fatal("verify consolidate must fail on an empty manifest")
+	}
+}
+
 // TestCheckPerStage spot-checks that Check agrees with where Next stops.
 func TestCheckPerStage(t *testing.T) {
 	root := t.TempDir()

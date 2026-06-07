@@ -182,11 +182,11 @@ func Decide(obs []Obs, s *State) Decision {
 		case o.Issues == 0:
 			d.add(o.AreaID, ActAccepted, "plan accepted (no blocking issues)")
 			d.Accepted = append(d.Accepted, o.AreaID)
-		case as.Replans >= s.MaxReplans:
+		case budgetExhausted(as, s.MaxReplans):
 			v := verdict(o.AreaID, ActEscalated, "max replans reached")
 			d.Verdicts = append(d.Verdicts, v)
 			d.Escalated = append(d.Escalated, v)
-		case as.Replans > 0 && o.Issues >= as.LastIssues:
+		case stalled(as, o.Issues):
 			v := verdict(o.AreaID, ActEscalated, "stalled: blocking issues not decreasing")
 			d.Verdicts = append(d.Verdicts, v)
 			d.Escalated = append(d.Escalated, v)
@@ -217,4 +217,25 @@ func (d *Decision) add(areaID string, a Action, reason string) {
 
 func verdict(areaID string, a Action, reason string) Verdict {
 	return Verdict{AreaID: areaID, Action: a, Reason: reason}
+}
+
+// budgetExhausted reports an area that has used its full replan budget.
+func budgetExhausted(as AreaState, maxReplans int) bool {
+	return as.Replans >= maxReplans
+}
+
+// stalled reports an area whose blocking-issue count failed to decrease across a
+// replan — more replanning is unlikely to help.
+func stalled(as AreaState, issues int) bool {
+	return as.Replans > 0 && issues >= as.LastIssues
+}
+
+// Escalated reports whether an area is terminally stuck — budget exhausted OR
+// stalled — and should be surfaced for human attention rather than replanned
+// again. It is the union of the two ActEscalated branches Decide uses, exposed so
+// resume's escalation guard cannot drift from the loop's own decision. Callers
+// must only consult it for an area in the escalation-decidable state (a failing
+// check present), matching where Decide evaluates it.
+func Escalated(as AreaState, maxReplans, issues int) bool {
+	return budgetExhausted(as, maxReplans) || stalled(as, issues)
 }
