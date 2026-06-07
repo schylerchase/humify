@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
 	"humify-ng/internal/state"
@@ -28,6 +29,7 @@ type options struct {
 	target     string
 	runner     string
 	testCmd    string
+	stage      string // second positional, e.g. `verify <stage>`
 	godLOC     int
 	maxReplans int
 	json       bool
@@ -58,6 +60,10 @@ func run(args []string) int {
 		return cmdPatchlog(opts)
 	case "undo":
 		return cmdUndo(opts)
+	case "resume":
+		return cmdResume(opts)
+	case "verify":
+		return cmdVerify(opts)
 	case "", "help", "-h", "--help":
 		printUsage()
 		return exitOK
@@ -93,11 +99,54 @@ func parseArgs(args []string) (string, options) {
 			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--max-replans=")); err == nil && n > 0 {
 				opts.maxReplans = n
 			}
-		case cmd == "" && !strings.HasPrefix(a, "-"):
-			cmd = a
+		case !strings.HasPrefix(a, "-"):
+			// First bare token is the command; a second (e.g. `verify <stage>`)
+			// is captured as the stage argument.
+			if cmd == "" {
+				cmd = a
+			} else if opts.stage == "" {
+				opts.stage = a
+			}
 		}
 	}
 	return cmd, opts
+}
+
+// saveHandoff best-effort writes the resume cursor after a command acts. It is a
+// convenience only — resume derives the next step from disk regardless — so a
+// write failure must not fail the command; it just means resume falls back to
+// pure disk derivation.
+func saveHandoff(root string, h handoff.Handoff) {
+	if root == "" {
+		return
+	}
+	_ = handoff.Save(root, h)
+}
+
+// promptPaths builds the root-relative prompt paths a spawn cursor advertises,
+// matching where each stage writes them under .humify/tmp/<sub>/.
+func promptPaths(sub string, ids []string) []string {
+	ps := make([]string, len(ids))
+	for i, id := range ids {
+		ps[i] = filepath.Join(layout.Dir, "tmp", sub, id+".prompt.md")
+	}
+	return ps
+}
+
+// resolveRoot finds the project root for a command: an explicit --root wins, else
+// walk up from --path to the nearest .humify/, else fall back to --path (or ".").
+// The fallback lets resume/verify still answer "needs_bootstrap" outside a project.
+func resolveRoot(opts options) string {
+	if opts.root != "" {
+		return opts.root
+	}
+	if found, ok := layout.FindRoot(opts.path); ok {
+		return found
+	}
+	if opts.path != "" {
+		return opts.path
+	}
+	return "."
 }
 
 func cmdStatus(opts options) int {
@@ -182,6 +231,8 @@ usage:
   humify execute     [--root=DIR] [--test-cmd=CMD] [--json]
   humify patchlog    [--root=DIR] [--json]
   humify undo        [--root=DIR] [--json]
+  humify resume      [--path=DIR] [--root=DIR] [--json]
+  humify verify      [STAGE] [--path=DIR] [--root=DIR] [--json]
 
 status       derive each area's lifecycle stage from on-disk artifacts under
              .humify/areas/. Nothing is stored, so a reset loses no progress.
@@ -208,8 +259,14 @@ patchlog     deterministic roll-up of every executed area into PATCHLOG.md
              (flips each to "patched"), with its merge commit and summary line.
 undo         revert execute's merge commits (newest first, via git revert, never
              reset) and clear the commit log. Requires a git repo at --root.
+resume       name the next step in the pipeline (advisory — prints the command to
+             run, never runs it). Disk is authoritative; a HANDOFF.json cursor, if
+             present and still in agreement, adds the exact prompts to spawn.
+verify       re-run a stage's deterministic gate read-only without doing its work.
+             STAGE is one of: heatmap audit consolidate plan execute patchlog;
+             omit STAGE to check the whole pipeline. Exit 2 on any incomplete gate.
 
-exit codes (status, audit, consolidate, plan, execute):
+exit codes (status, audit, consolidate, plan, execute, resume, verify):
   0  clean / dispatched / converged / merged   1  not a humify project / error
   2  drift, pending, escalated, blocked, or gate-failed`)
 }

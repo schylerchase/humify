@@ -117,6 +117,29 @@ func LoadCommits(root string) ([]CommitRecord, error) {
 	return recs, nil
 }
 
+// ScanPlanState derives, per area, whether it has a PLAN.md (planned) and a
+// SUMMARY.md (executed) on disk. It is shared by the execute command (to locate
+// the current wave) and the pipeline reducer (to decide whether execution is
+// done), so both read "planned" and "executed" the same way.
+func ScanPlanState(root string) (planned, executed map[string]bool) {
+	planned, executed = map[string]bool{}, map[string]bool{}
+	ids, _ := layout.DiscoverAreas(root)
+	for _, id := range ids {
+		if fileExists(layout.AreaPlan(root, id)) {
+			planned[id] = true
+		}
+		if fileExists(layout.AreaSummary(root, id)) {
+			executed[id] = true
+		}
+	}
+	return planned, executed
+}
+
+func fileExists(p string) bool {
+	info, err := os.Stat(p)
+	return err == nil && !info.IsDir()
+}
+
 // CurrentWave returns the lowest-index wave that still has planned-but-not-yet-
 // executed slices, that wave's remaining slice ids (sorted), and done=true when
 // no wave has remaining work. Returning only one wave's slices enforces the

@@ -2,7 +2,7 @@
 
 A massive-codebase untangler that **owns its orchestration loop in deterministic code**. The agent is a worker the binary calls — not the orchestrator — so the fan-out→gather→verify discipline can't drift. Design rationale and full roadmap: [`../HUMIFY-NG-ARCHITECTURE.md`](../HUMIFY-NG-ARCHITECTURE.md).
 
-## Status: stages 1–6 + undo (full pipeline)
+## Status: stages 1–7 — full pipeline + resilience surface
 
 **Deterministic core (no agents):**
 
@@ -18,6 +18,11 @@ A massive-codebase untangler that **owns its orchestration loop in deterministic
 - **`humify plan`** — advances the per-area plan convergence loop: planner → adversarial **read-only** plan-checker, re-planning with feedback until each finding-bearing area has an accepted `PLAN.md` (bounded by `--max-replans`, default 3, with stall detection).
 - **`humify execute`** — advances execution one dependency wave at a time: forks an isolated git worktree+branch per planned slice and dispatches executors, then on re-run runs the fail-closed merge barrier, the `--test-cmd` build/test gate, and the verifiers. Requires a git repo at `--root`.
 
+**Resilience surface** — answers "what next?" and "is this stage really done?" deterministically, so a multi-stage run survives context resets and orchestrator restarts:
+
+- **`humify resume`** — names the next step in the pipeline (advisory: it prints the command to run, never runs it). **Disk is authoritative**: it derives the step from on-disk artifacts and only *enriches* it with the one-shot `HANDOFF.json` cursor a dispatching command left behind. If that cursor still agrees with disk it adds the exact prompts to spawn; if it disagrees — because the agents it dispatched have since advanced the disk — the cursor is flagged stale and disk wins. So `resume` is correct even with `HANDOFF.json` absent or stale, which is the case that matters after a reset.
+- **`humify verify [STAGE]`** — re-runs a stage's deterministic gate read-only, without doing its work (`heatmap audit consolidate plan execute patchlog`; omit `STAGE` for the whole pipeline). Exit 2 on any incomplete gate, so CI or a wrapping loop can branch on completeness rather than trust an agent's self-report.
+
 ## Build & run
 
 ```sh
@@ -30,6 +35,8 @@ go build -o humify.exe .
 ./humify.exe execute     [--root=DIR] [--test-cmd=CMD] [--json]
 ./humify.exe patchlog    [--root=DIR] [--json]
 ./humify.exe undo        [--root=DIR] [--json]
+./humify.exe resume      [--path=DIR] [--root=DIR] [--json]
+./humify.exe verify      [STAGE] [--path=DIR] [--root=DIR] [--json]
 go test ./...
 ```
 

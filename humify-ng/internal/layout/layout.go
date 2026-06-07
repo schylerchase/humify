@@ -62,6 +62,12 @@ func ConflictsFile(root string) string { return filepath.Join(root, Dir, "CONFLI
 // TmpDir returns .humify/tmp, home of transient fan-in state (the manifest).
 func TmpDir(root string) string { return filepath.Join(root, Dir, "tmp") }
 
+// HandoffFile returns .humify/tmp/HANDOFF.json — the one-shot resume cursor a
+// dispatching command leaves for `humify resume`. It lives under tmp/ (gitignored,
+// per-run scratch) because it is a convenience, never authoritative: resume falls
+// back to disk derivation whenever it is absent or stale.
+func HandoffFile(root string) string { return filepath.Join(TmpDir(root), "HANDOFF.json") }
+
 // AreaFragmentRel returns the audit-fragment path for an area id, relative to
 // the project root. This is the single definition of the fragment filename
 // pattern; the manifest stores this relative form (so it is portable) and

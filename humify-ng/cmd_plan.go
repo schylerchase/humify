@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"humify-ng/internal/area"
 	"humify-ng/internal/consolidate"
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
@@ -50,9 +50,9 @@ func cmdPlan(opts options) int {
 	}
 
 	byArea := groupFindings(res.Findings)
-	targets := findingTargets(byArea)
+	targets := consolidate.FindingAreas(res)
 	if len(targets) == 0 {
-		return emitPlanNothing(opts)
+		return emitPlanNothing(opts, root)
 	}
 
 	st, err := plan.Load(root)
@@ -64,7 +64,7 @@ func cmdPlan(opts options) int {
 	}
 	st.Reconcile(targets)
 
-	d := plan.Decide(observe(root, targets), &st)
+	d := plan.Decide(plan.Observe(root, targets), &st)
 	// Dispatch (which deletes stale verdicts for re-plans) BEFORE persisting the
 	// bumped replan counters. A bumped counter must never reach disk while the
 	// stale verdict it assumes-deleted is still there: that pairing would make
@@ -77,7 +77,7 @@ func cmdPlan(opts options) int {
 	if err := st.Save(root); err != nil {
 		return fail(opts, "state_error", exitError, "save loop state: "+err.Error())
 	}
-	return emitPlan(opts, d)
+	return emitPlan(opts, root, d)
 }
 
 // groupFindings flattens consolidated findings to each area that reported them.
@@ -90,31 +90,6 @@ func groupFindings(merged []consolidate.Merged) map[string][]plan.Finding {
 		}
 	}
 	return byArea
-}
-
-func findingTargets(byArea map[string][]plan.Finding) []string {
-	var ids []string
-	for id := range byArea {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-// observe derives each target's plan state from disk: PLAN.md presence, a valid
-// PLAN-CHECK.json verdict, and its blocking-issue count. An unreadable or
-// invalid check counts as "no verdict" so the checker is simply re-dispatched.
-func observe(root string, targets []string) []plan.Obs {
-	obs := make([]plan.Obs, 0, len(targets))
-	for _, id := range targets {
-		o := plan.Obs{AreaID: id, HasPlan: fileExists(layout.AreaPlan(root, id))}
-		if c, err := plancheck.Load(layout.AreaPlanCheck(root, id)); err == nil && c.Validate() == nil {
-			o.HasCheck = true
-			o.Issues = c.BlockingCount()
-		}
-		obs = append(obs, o)
-	}
-	return obs
 }
 
 // dispatchPlan writes the prompts the round calls for. Re-plans read the prior
@@ -173,11 +148,24 @@ func dispatchPlan(root, target string, areas map[string]area.Area, byArea map[st
 	return nil
 }
 
-func emitPlan(opts options, d plan.Decision) int {
+func emitPlan(opts options, root string, d plan.Decision) int {
 	ok := d.Status != plan.StatusEscalated
 	code := exitOK
 	if !ok {
 		code = exitDrift
+	}
+	switch d.Status {
+	case plan.StatusConverged:
+		saveHandoff(root, handoff.Handoff{Stage: "plan", Action: "proceed",
+			NextCommand: "humify execute", Note: "plans accepted — execute the waves"})
+	case plan.StatusEscalated:
+		saveHandoff(root, handoff.Handoff{Stage: "plan", Action: "blocked",
+			NextCommand: "humify plan --max-replans=N", Note: "replan budget exhausted — inspect PLAN-CHECK.json"})
+	default:
+		prompts := append(promptPaths("planners", d.PlanAreas), promptPaths("plan-checkers", d.CheckAreas)...)
+		saveHandoff(root, handoff.Handoff{Stage: "plan", Action: "spawn",
+			NextCommand: "humify plan", Prompts: prompts,
+			Note: "spawn the dispatched planners/checkers, then re-run plan"})
 	}
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: ok, ReasonCode: d.Status, Data: planData(d)})
@@ -206,7 +194,9 @@ func emitPlan(opts options, d plan.Decision) int {
 	return code
 }
 
-func emitPlanNothing(opts options) int {
+func emitPlanNothing(opts options, root string) int {
+	saveHandoff(root, handoff.Handoff{Stage: "plan", Action: "proceed",
+		NextCommand: "humify status", Note: "no findings to plan — pipeline complete"})
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: true, ReasonCode: "nothing_to_plan"})
 		return exitOK

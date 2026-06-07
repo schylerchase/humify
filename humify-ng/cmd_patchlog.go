@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	hexec "humify-ng/internal/exec"
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
 )
@@ -54,6 +55,8 @@ func cmdPatchlog(opts options) int {
 	if err := os.WriteFile(layout.PatchlogFile(root), []byte(doc), 0o644); err != nil {
 		return fail(opts, "write_error", exitError, "write PATCHLOG.md: "+err.Error())
 	}
+	saveHandoff(root, handoff.Handoff{Stage: "patchlog", Action: "proceed",
+		NextCommand: "humify status", Note: "pipeline complete — patchlog rolled up"})
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: true, ReasonCode: "ok",
 			Data: map[string]any{"patched": executed}})

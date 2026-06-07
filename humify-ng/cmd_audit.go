@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"humify-ng/internal/audit"
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
@@ -84,6 +85,18 @@ func emitAudit(opts options, plan audit.Plan, out audit.Outcome) int {
 		reason, code = "intel_drift", exitDrift
 	case len(plan.Pending) == 0:
 		reason = "ok"
+	}
+	switch {
+	case len(plan.Missing) > 0:
+		saveHandoff(plan.Root, handoff.Handoff{Stage: "audit", Action: "blocked",
+			NextCommand: "humify heatmap", Note: "intel drift — re-run heatmap"})
+	case len(plan.Pending) == 0:
+		saveHandoff(plan.Root, handoff.Handoff{Stage: "audit", Action: "proceed",
+			NextCommand: "humify consolidate", Note: "all areas audited — gather fragments into AUDIT.md"})
+	default:
+		saveHandoff(plan.Root, handoff.Handoff{Stage: "audit", Action: "spawn",
+			NextCommand: "humify consolidate", Prompts: out.Prompts,
+			Note: "spawn one read-only auditor per prompt, then consolidate"})
 	}
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{

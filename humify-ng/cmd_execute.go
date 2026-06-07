@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	hexec "humify-ng/internal/exec"
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
@@ -43,10 +44,10 @@ func cmdExecute(opts options) int {
 		return fail(opts, reason, exitError, err.Error())
 	}
 
-	planned, executed := scanPlanState(root)
+	planned, executed := hexec.ScanPlanState(root)
 	waveIdx, waveSlices, done := hexec.CurrentWave(in.Waves, planned, executed)
 	if done {
-		return emitExecuteDone(opts, len(executed) > 0)
+		return emitExecuteDone(opts, root, len(executed) > 0)
 	}
 
 	g := worktree.NewGit(root)
@@ -96,6 +97,9 @@ func forkPhase(opts options, root string, g worktree.Git, target string, waveIdx
 	if err := hexec.SaveManifest(root, manifest); err != nil {
 		return fail(opts, "manifest_error", exitError, "save exec manifest: "+err.Error())
 	}
+	saveHandoff(root, handoff.Handoff{Stage: "execute", Action: "spawn",
+		NextCommand: "humify execute", Prompts: promptPaths("executors", toFork),
+		Note: "spawn one executor per prompt (each in its worktree), then re-run execute to merge"})
 	data := map[string]any{"status": "forked", "wave": waveIdx, "forked": toFork}
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: true, ReasonCode: "forked", Data: data})
@@ -127,7 +131,7 @@ func mergePhase(opts options, root string, g worktree.Git, waveIdx int, manifest
 	if res.Blocked != nil {
 		// Keep only the blocked + pending entries so a re-run retries them.
 		_ = hexec.SaveManifest(root, remainingEntries(manifest, res))
-		return emitMergeBlocked(opts, waveIdx, res)
+		return emitMergeBlocked(opts, root, waveIdx, res)
 	}
 	if err := hexec.ClearManifest(root); err != nil {
 		return fail(opts, "manifest_error", exitError, "clear manifest: "+err.Error())
@@ -135,11 +139,11 @@ func mergePhase(opts options, root string, g worktree.Git, waveIdx int, manifest
 
 	if opts.testCmd != "" {
 		if code, err := runGate(root, opts.testCmd); err != nil || code != 0 {
-			return emitGateFailed(opts, waveIdx, opts.testCmd, code, err)
+			return emitGateFailed(opts, root, waveIdx, opts.testCmd, code, err)
 		}
 	}
 	dispatchVerifiers(root, res.Merged)
-	return emitWaveMerged(opts, waveIdx, res, opts.testCmd != "")
+	return emitWaveMerged(opts, root, waveIdx, res, opts.testCmd != "")
 }
 
 func commitRecords(merged []worktree.Merged, wave int) []hexec.CommitRecord {
@@ -214,26 +218,15 @@ func isGitRepo(root string) bool {
 	return err == nil
 }
 
-// scanPlanState derives, per area, whether it has a PLAN.md (planned) and a
-// SUMMARY.md (executed) on disk.
-func scanPlanState(root string) (planned, executed map[string]bool) {
-	planned, executed = map[string]bool{}, map[string]bool{}
-	ids, _ := layout.DiscoverAreas(root)
-	for _, id := range ids {
-		if fileExists(layout.AreaPlan(root, id)) {
-			planned[id] = true
-		}
-		if fileExists(layout.AreaSummary(root, id)) {
-			executed[id] = true
-		}
-	}
-	return planned, executed
-}
-
-func emitExecuteDone(opts options, anyExecuted bool) int {
+func emitExecuteDone(opts options, root string, anyExecuted bool) int {
 	reason, msg := "nothing_to_execute", "nothing to execute — run `humify plan` first"
 	if anyExecuted {
 		reason, msg = "execution_complete", "execution complete — run `humify patchlog` to roll up the changes"
+		saveHandoff(root, handoff.Handoff{Stage: "execute", Action: "proceed",
+			NextCommand: "humify patchlog", Note: "all waves executed — roll up the patchlog"})
+	} else {
+		saveHandoff(root, handoff.Handoff{Stage: "execute", Action: "proceed",
+			NextCommand: "humify plan", Note: "nothing planned to execute yet"})
 	}
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: true, ReasonCode: reason})
@@ -243,7 +236,9 @@ func emitExecuteDone(opts options, anyExecuted bool) int {
 	return exitOK
 }
 
-func emitMergeBlocked(opts options, waveIdx int, res worktree.WaveResult) int {
+func emitMergeBlocked(opts options, root string, waveIdx int, res worktree.WaveResult) int {
+	saveHandoff(root, handoff.Handoff{Stage: "execute", Action: "blocked",
+		NextCommand: "humify execute", Note: "a slice failed the merge barrier — fix its worktree/branch, then re-run execute"})
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: false, ReasonCode: "merge_blocked", Data: res})
 		return exitDrift
@@ -260,7 +255,9 @@ func emitMergeBlocked(opts options, waveIdx int, res worktree.WaveResult) int {
 	return exitDrift
 }
 
-func emitGateFailed(opts options, waveIdx int, testCmd string, code int, err error) int {
+func emitGateFailed(opts options, root string, waveIdx int, testCmd string, code int, err error) int {
+	saveHandoff(root, handoff.Handoff{Stage: "execute", Action: "blocked",
+		NextCommand: "humify execute", Note: "build/test gate failed after merge — fix forward, or `humify undo` this wave"})
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: false, ReasonCode: "gate_failed",
 			Data: map[string]any{"wave": waveIdx, "test_cmd": testCmd, "exit": code}})
@@ -275,7 +272,14 @@ func emitGateFailed(opts options, waveIdx int, testCmd string, code int, err err
 	return exitDrift
 }
 
-func emitWaveMerged(opts options, waveIdx int, res worktree.WaveResult, gated bool) int {
+func emitWaveMerged(opts options, root string, waveIdx int, res worktree.WaveResult, gated bool) int {
+	mergedIDs := make([]string, len(res.Merged))
+	for i, m := range res.Merged {
+		mergedIDs[i] = m.SliceID
+	}
+	saveHandoff(root, handoff.Handoff{Stage: "execute", Action: "spawn",
+		NextCommand: "humify execute", Prompts: promptPaths("verifiers", mergedIDs),
+		Note: "wave merged — optionally spawn verifiers (advisory), then re-run execute for the next wave"})
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: true, ReasonCode: "wave_merged", Data: res})
 		return exitOK

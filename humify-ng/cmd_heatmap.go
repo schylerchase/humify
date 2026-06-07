@@ -7,6 +7,7 @@ import (
 
 	"humify-ng/internal/area"
 	"humify-ng/internal/graph"
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/heatmap"
 	"humify-ng/internal/intel"
 	"humify-ng/internal/layout"
@@ -87,6 +88,8 @@ func writeProject(root, target string, scores []heatmap.Score, g graph.Result, i
 }
 
 func emitHeatmap(opts options, root string, scores []heatmap.Score, g graph.Result, files int) int {
+	saveHandoff(root, handoff.Handoff{Stage: "heatmap", Action: "proceed",
+		NextCommand: "humify audit", Note: "project bootstrapped — fan out auditors next"})
 	top := scores
 	if len(top) > 10 {
 		top = top[:10]

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"humify-ng/internal/consolidate"
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
 )
@@ -65,6 +66,13 @@ func emitConsolidate(opts options, root string, res consolidate.Result) int {
 	code := exitOK
 	if !ok {
 		code = exitDrift
+	}
+	if ok {
+		saveHandoff(root, handoff.Handoff{Stage: "consolidate", Action: "proceed",
+			NextCommand: "humify plan", Note: "AUDIT.md ready — plan the findings"})
+	} else {
+		saveHandoff(root, handoff.Handoff{Stage: "consolidate", Action: "blocked",
+			NextCommand: "humify audit", Note: "pending/blocked fragments — re-audit the affected areas"})
 	}
 	if opts.json {
 		output.EmitJSON(os.Stdout, output.Result{Ok: ok, ReasonCode: reason, Data: res})

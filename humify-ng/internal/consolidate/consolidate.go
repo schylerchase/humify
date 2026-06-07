@@ -227,6 +227,20 @@ func (r *Result) tally() {
 	}
 }
 
+// FindingAreas returns the sorted, unique area ids that reported at least one
+// finding — the set the plan stage targets. The plan command (to decide what to
+// dispatch) and the pipeline reducer (to decide whether planning is complete)
+// both derive their target set from this one definition, so they cannot drift.
+func FindingAreas(res Result) []string {
+	set := map[string]bool{}
+	for _, m := range res.Findings {
+		for _, src := range m.Sources {
+			set[src] = true
+		}
+	}
+	return sortedKeys(set)
+}
+
 func normTitle(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
 
 func sortedKeys(m map[string]bool) []string {
