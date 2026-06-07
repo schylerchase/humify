@@ -75,6 +75,25 @@ func AreaFragment(root, areaID string) string {
 	return filepath.Join(root, AreaFragmentRel(areaID))
 }
 
+// AreaPlanRel returns an area's PLAN.md path relative to root. The "-PLAN.md"
+// suffix is what package state counts as a plan, so the name is load-bearing.
+func AreaPlanRel(areaID string) string {
+	return filepath.Join(Dir, "areas", areaID, areaID+"-PLAN.md")
+}
+
+// AreaPlan returns the absolute PLAN.md path for an area.
+func AreaPlan(root, areaID string) string { return filepath.Join(root, AreaPlanRel(areaID)) }
+
+// AreaPlanCheckRel returns an area's plan-check path relative to root. It ends in
+// ".json" and does NOT match the "-PLAN.md" suffix, so it never inflates the
+// plan count package state derives.
+func AreaPlanCheckRel(areaID string) string {
+	return filepath.Join(Dir, "areas", areaID, areaID+"-PLAN-CHECK.json")
+}
+
+// AreaPlanCheck returns the absolute plan-check path for an area.
+func AreaPlanCheck(root, areaID string) string { return filepath.Join(root, AreaPlanCheckRel(areaID)) }
+
 // ResolveInRoot resolves a project-relative path against root, rejecting any
 // path that is empty, absolute, carries a volume, or escapes the root via "..".
 // The volume check stops Windows drive-relative escapes ("C:..\..\x") that are

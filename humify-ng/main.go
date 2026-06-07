@@ -23,12 +23,13 @@ const (
 )
 
 type options struct {
-	path   string
-	root   string
-	target string
-	runner string
-	godLOC int
-	json   bool
+	path       string
+	root       string
+	target     string
+	runner     string
+	godLOC     int
+	maxReplans int
+	json       bool
 }
 
 const defaultGodLOC = 1500
@@ -48,6 +49,8 @@ func run(args []string) int {
 		return cmdAudit(opts)
 	case "consolidate":
 		return cmdConsolidate(opts)
+	case "plan":
+		return cmdPlan(opts)
 	case "", "help", "-h", "--help":
 		printUsage()
 		return exitOK
@@ -76,6 +79,10 @@ func parseArgs(args []string) (string, options) {
 		case strings.HasPrefix(a, "--god-loc="):
 			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--god-loc=")); err == nil && n > 0 {
 				opts.godLOC = n
+			}
+		case strings.HasPrefix(a, "--max-replans="):
+			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--max-replans=")); err == nil && n > 0 {
+				opts.maxReplans = n
 			}
 		case cmd == "" && !strings.HasPrefix(a, "-"):
 			cmd = a
@@ -155,13 +162,14 @@ func pct(n, total int) string {
 }
 
 func printUsage() {
-	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-3)
+	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-4)
 
 usage:
   humify status      [--path=DIR] [--json]
   humify heatmap     --target=DIR [--root=DIR] [--god-loc=N] [--json]
   humify audit       [--root=DIR] [--runner=dispatch] [--json]
   humify consolidate [--root=DIR] [--json]
+  humify plan        [--root=DIR] [--max-replans=N] [--json]
 
 status       derive each area's lifecycle stage from on-disk artifacts under
              .humify/areas/. Nothing is stored, so a reset loses no progress.
@@ -175,7 +183,13 @@ audit        plan the audit fan-out: derive which areas still need an auditor
 consolidate  gather all audit fragments named in the manifest into one AUDIT.md
              (dedup, cycle-detect, bucket conflicts), fail-closed on any pending
              or invalid fragment. Writes AUDIT.md + CONFLICTS.md.
+plan         advance the per-area plan convergence loop one round: dispatch
+             planners then adversarial plan-checkers, re-planning with feedback
+             until each finding-bearing area has an accepted PLAN.md (bounded by
+             --max-replans, default 3, with stall detection). Resumable; the
+             orchestrator spawns the dispatched agents and re-runs.
 
-exit codes (status, audit, consolidate):
-  0  clean / dispatched   1  not a humify project / error   2  drift or pending`)
+exit codes (status, audit, consolidate, plan):
+  0  clean / dispatched / converged   1  not a humify project / error
+  2  drift, pending, or escalated`)
 }
