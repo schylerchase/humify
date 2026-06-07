@@ -45,6 +45,10 @@ type Git interface {
 	Merge(branch, message string) (sha string, err error)
 	RemoveWorktree(path string) error
 	DeleteBranch(branch string) error
+	// RevertMerge reverts a --no-ff merge commit relative to its first parent
+	// (the base mainline), creating a new revert commit. Used by `humify undo`;
+	// never a reset, so history is preserved and the undo is itself reversible.
+	RevertMerge(sha string) error
 }
 
 // Merged records one slice that merged cleanly, with the resulting merge commit.

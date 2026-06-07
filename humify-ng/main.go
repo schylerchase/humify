@@ -27,6 +27,7 @@ type options struct {
 	root       string
 	target     string
 	runner     string
+	testCmd    string
 	godLOC     int
 	maxReplans int
 	json       bool
@@ -51,6 +52,12 @@ func run(args []string) int {
 		return cmdConsolidate(opts)
 	case "plan":
 		return cmdPlan(opts)
+	case "execute":
+		return cmdExecute(opts)
+	case "patchlog":
+		return cmdPatchlog(opts)
+	case "undo":
+		return cmdUndo(opts)
 	case "", "help", "-h", "--help":
 		printUsage()
 		return exitOK
@@ -76,6 +83,8 @@ func parseArgs(args []string) (string, options) {
 			opts.target = strings.TrimPrefix(a, "--target=")
 		case strings.HasPrefix(a, "--runner="):
 			opts.runner = strings.TrimPrefix(a, "--runner=")
+		case strings.HasPrefix(a, "--test-cmd="):
+			opts.testCmd = strings.TrimPrefix(a, "--test-cmd=")
 		case strings.HasPrefix(a, "--god-loc="):
 			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--god-loc=")); err == nil && n > 0 {
 				opts.godLOC = n
@@ -162,7 +171,7 @@ func pct(n, total int) string {
 }
 
 func printUsage() {
-	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-4)
+	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-6)
 
 usage:
   humify status      [--path=DIR] [--json]
@@ -170,6 +179,9 @@ usage:
   humify audit       [--root=DIR] [--runner=dispatch] [--json]
   humify consolidate [--root=DIR] [--json]
   humify plan        [--root=DIR] [--max-replans=N] [--json]
+  humify execute     [--root=DIR] [--test-cmd=CMD] [--json]
+  humify patchlog    [--root=DIR] [--json]
+  humify undo        [--root=DIR] [--json]
 
 status       derive each area's lifecycle stage from on-disk artifacts under
              .humify/areas/. Nothing is stored, so a reset loses no progress.
@@ -188,8 +200,16 @@ plan         advance the per-area plan convergence loop one round: dispatch
              until each finding-bearing area has an accepted PLAN.md (bounded by
              --max-replans, default 3, with stall detection). Resumable; the
              orchestrator spawns the dispatched agents and re-runs.
+execute      advance execution one dependency wave at a time: fork an isolated
+             git worktree+branch per planned slice and dispatch executors, then
+             on re-run run the fail-closed merge barrier, the --test-cmd gate,
+             and dispatch verifiers. Requires a git repo at --root.
+patchlog     deterministic roll-up of every executed area into PATCHLOG.md
+             (flips each to "patched"), with its merge commit and summary line.
+undo         revert execute's merge commits (newest first, via git revert, never
+             reset) and clear the commit log. Requires a git repo at --root.
 
-exit codes (status, audit, consolidate, plan):
-  0  clean / dispatched / converged   1  not a humify project / error
-  2  drift, pending, or escalated`)
+exit codes (status, audit, consolidate, plan, execute):
+  0  clean / dispatched / converged / merged   1  not a humify project / error
+  2  drift, pending, escalated, blocked, or gate-failed`)
 }

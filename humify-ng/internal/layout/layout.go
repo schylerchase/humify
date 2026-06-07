@@ -94,6 +94,31 @@ func AreaPlanCheckRel(areaID string) string {
 // AreaPlanCheck returns the absolute plan-check path for an area.
 func AreaPlanCheck(root, areaID string) string { return filepath.Join(root, AreaPlanCheckRel(areaID)) }
 
+// AreaSummaryRel returns an area's SUMMARY.md path relative to root. The executor
+// writes it inside its worktree and commits it; after the merge it lands here,
+// and its presence is what package state derives "executed" from.
+func AreaSummaryRel(areaID string) string {
+	return filepath.Join(Dir, "areas", areaID, areaID+"-SUMMARY.md")
+}
+
+// AreaSummary returns the absolute SUMMARY.md path for an area.
+func AreaSummary(root, areaID string) string { return filepath.Join(root, AreaSummaryRel(areaID)) }
+
+// AreaVerifyRel returns an area's verifier-verdict path relative to root.
+func AreaVerifyRel(areaID string) string {
+	return filepath.Join(Dir, "areas", areaID, areaID+"-VERIFY.json")
+}
+
+// AreaVerify returns the absolute verifier-verdict path for an area.
+func AreaVerify(root, areaID string) string { return filepath.Join(root, AreaVerifyRel(areaID)) }
+
+// WorktreeDir returns the isolated worktree path for a slice. Worktrees live in a
+// sibling directory of the repo (never nested inside the tracked tree); the repo
+// base name namespaces sibling repos that share a parent.
+func WorktreeDir(root, areaID string) string {
+	return filepath.Join(filepath.Dir(root), ".humify-worktrees", filepath.Base(root)+"-"+areaID)
+}
+
 // ResolveInRoot resolves a project-relative path against root, rejecting any
 // path that is empty, absolute, carries a volume, or escapes the root via "..".
 // The volume check stops Windows drive-relative escapes ("C:..\..\x") that are

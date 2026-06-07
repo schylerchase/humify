@@ -23,6 +23,7 @@ type mockGit struct {
 	mergeCalls   []string
 	removeCalls  []string
 	delBranches  []string
+	reverted     []string
 }
 
 func newMock() *mockGit {
@@ -70,7 +71,8 @@ func (m *mockGit) RemoveWorktree(path string) error {
 	m.removeCalls = append(m.removeCalls, path)
 	return nil
 }
-func (m *mockGit) DeleteBranch(b string) error { m.delBranches = append(m.delBranches, b); return nil }
+func (m *mockGit) DeleteBranch(b string) error  { m.delBranches = append(m.delBranches, b); return nil }
+func (m *mockGit) RevertMerge(sha string) error { m.reverted = append(m.reverted, sha); return nil }
 
 func ent(id string) Entry {
 	return Entry{SliceID: id, WorktreePath: "/wt/" + id, Branch: BranchFor(id), ExpectedBase: "base0"}

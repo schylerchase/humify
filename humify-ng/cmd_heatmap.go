@@ -77,6 +77,12 @@ func writeProject(root, target string, scores []heatmap.Score, g graph.Result, i
 	if err := os.WriteFile(filepath.Join(layout.HumifyDir(root), "HEATMAP.md"), []byte(md), 0o644); err != nil {
 		return err
 	}
+	// Keep transient state out of version control: .humify/areas (fragments,
+	// plans, summaries) is meant to be committed and travel with the repo, but
+	// tmp/ (manifests, prompts, loop state) is per-run scratch.
+	if err := os.WriteFile(filepath.Join(layout.HumifyDir(root), ".gitignore"), []byte("tmp/\n"), 0o644); err != nil {
+		return err
+	}
 	return intel.Write(root, in)
 }
 

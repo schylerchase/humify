@@ -91,3 +91,10 @@ func (g gitCLI) DeleteBranch(branch string) error {
 	_, err := run(g.repoDir, "branch", "-D", branch)
 	return err
 }
+
+func (g gitCLI) RevertMerge(sha string) error {
+	// -m 1 reverts relative to the first parent (the base the slice merged into),
+	// which is the only sane mainline for a humify --no-ff slice merge.
+	_, err := run(g.repoDir, "revert", "--no-edit", "-m", "1", sha)
+	return err
+}
