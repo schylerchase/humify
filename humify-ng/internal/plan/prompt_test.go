@@ -45,4 +45,19 @@ func TestPlannerPromptNormalizesTarget(t *testing.T) {
 	if !strings.Contains(out, "C:/src/a/b.go") {
 		t.Fatalf("target not normalized to forward slashes:\n%s", out)
 	}
+	if strings.Contains(out, `\`) {
+		t.Fatalf("planner prompt leaked a backslash (mixed separators):\n%s", out)
+	}
+}
+
+// The checker prompt renders the same target display contract — backslashes
+// become forward slashes on any host (filepath.ToSlash is a Unix no-op).
+func TestCheckerPromptNormalizesTarget(t *testing.T) {
+	out := RenderCheckerPrompt(CheckerJob{AreaID: "01-a", Target: `C:\src`, PlanPath: "p", CheckPath: "c"})
+	if !strings.Contains(out, "C:/src") {
+		t.Fatalf("checker target not normalized to forward slashes:\n%s", out)
+	}
+	if strings.Contains(out, `\`) {
+		t.Fatalf("checker prompt leaked a backslash:\n%s", out)
+	}
 }

@@ -3,8 +3,9 @@ package audit
 import (
 	"fmt"
 	"path"
-	"path/filepath"
 	"strings"
+
+	"humify-ng/internal/textutil"
 )
 
 // RenderPrompt builds the auditor prompt for one area. The auditor is a
@@ -22,7 +23,7 @@ func RenderPrompt(j Job, target string) string {
 	// Display paths are always forward-slash for the prompt. The area's own files
 	// arrive forward-slashed (scan normalizes them), but target may be native
 	// (e.g. a Windows "C:\src"); normalize it so path.Join never mixes separators.
-	target = filepath.ToSlash(target)
+	target = textutil.ToForwardSlash(target)
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Humify auditor — area %s\n\n", j.AreaID)
 	b.WriteString("## Stance\n")
@@ -39,10 +40,10 @@ func RenderPrompt(j Job, target string) string {
 	fmt.Fprintf(&b, "- Target codebase root: `%s`\n", target)
 	b.WriteString("- Read ONLY these files (paths are relative to the target root):\n")
 	for _, f := range j.Files {
-		fmt.Fprintf(&b, "    - `%s`\n", path.Join(target, f))
+		fmt.Fprintf(&b, "    - `%s`\n", textutil.ToForwardSlash(path.Join(target, f)))
 	}
 	if len(j.Files) == 0 {
-		fmt.Fprintf(&b, "    - (no files listed; read everything under `%s`)\n", path.Join(target, j.Root))
+		fmt.Fprintf(&b, "    - (no files listed; read everything under `%s`)\n", textutil.ToForwardSlash(path.Join(target, j.Root)))
 	}
 	b.WriteString("\n")
 

@@ -15,3 +15,14 @@ var lineFlattener = strings.NewReplacer("\n", " ", "\r", " ")
 func OneLine(s string) string {
 	return lineFlattener.Replace(s)
 }
+
+// ToForwardSlash replaces every backslash with a forward slash, unconditionally
+// and independent of the host OS. Unlike filepath.ToSlash — which rewrites only
+// the OS-native separator and is therefore a no-op on Unix — this normalizes a
+// Windows-style path such as `C:\src` to `C:/src` even when running on
+// macOS/Linux. Use it for display paths embedded in prompts: those artifacts
+// must render identically on every host, so the normalization cannot depend on
+// the separator of the machine the binary happens to run on.
+func ToForwardSlash(s string) string {
+	return strings.ReplaceAll(s, "\\", "/")
+}

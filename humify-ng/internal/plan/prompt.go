@@ -3,7 +3,6 @@ package plan
 import (
 	"fmt"
 	"path"
-	"path/filepath"
 	"strings"
 
 	"humify-ng/internal/plancheck"
@@ -50,7 +49,7 @@ type CheckerJob struct {
 // preserving refactoring plan that addresses every confirmed audit finding,
 // with concrete file paths and a characterization-test scenario per unit.
 func RenderPlannerPrompt(j PlannerJob) string {
-	target := filepath.ToSlash(j.Target)
+	target := textutil.ToForwardSlash(j.Target)
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Humify planner — area %s\n\n", j.AreaID)
 
@@ -64,7 +63,7 @@ func RenderPlannerPrompt(j PlannerJob) string {
 	fmt.Fprintf(&b, "- Area: `%s`\n- Target codebase root: `%s`\n", j.AreaID, target)
 	b.WriteString("- Files in this area (read them before planning):\n")
 	for _, f := range j.Files {
-		fmt.Fprintf(&b, "    - `%s`\n", path.Join(target, f))
+		fmt.Fprintf(&b, "    - `%s`\n", textutil.ToForwardSlash(path.Join(target, f)))
 	}
 	b.WriteString("\n## Confirmed findings to address (every one must map to a unit)\n")
 	if len(j.Findings) == 0 {
@@ -107,7 +106,7 @@ func RenderPlannerPrompt(j PlannerJob) string {
 // checker writes a structured verdict; zero blocker/warning issues accepts the
 // plan and ends the loop for this area.
 func RenderCheckerPrompt(j CheckerJob) string {
-	target := filepath.ToSlash(j.Target)
+	target := textutil.ToForwardSlash(j.Target)
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Humify plan-checker — area %s\n\n", j.AreaID)
 
