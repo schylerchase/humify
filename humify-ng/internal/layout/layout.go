@@ -14,6 +14,7 @@
 package layout
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -61,9 +62,35 @@ func ConflictsFile(root string) string { return filepath.Join(root, Dir, "CONFLI
 // TmpDir returns .humify/tmp, home of transient fan-in state (the manifest).
 func TmpDir(root string) string { return filepath.Join(root, Dir, "tmp") }
 
-// AreaFragment returns the conventional audit-fragment path for an area id.
+// AreaFragmentRel returns the audit-fragment path for an area id, relative to
+// the project root. This is the single definition of the fragment filename
+// pattern; the manifest stores this relative form (so it is portable) and
+// AreaFragment joins it to a root.
+func AreaFragmentRel(areaID string) string {
+	return filepath.Join(Dir, "areas", areaID, areaID+"-AUDIT-fragment.json")
+}
+
+// AreaFragment returns the absolute audit-fragment path for an area id.
 func AreaFragment(root, areaID string) string {
-	return filepath.Join(AreasDir(root), areaID, areaID+"-AUDIT-fragment.json")
+	return filepath.Join(root, AreaFragmentRel(areaID))
+}
+
+// ResolveInRoot resolves a project-relative path against root, rejecting any
+// path that is empty, absolute, carries a volume, or escapes the root via "..".
+// The volume check stops Windows drive-relative escapes ("C:..\..\x") that are
+// neither absolute nor ".."-prefixed yet still resolve above root. It is the one
+// gate every stage uses before opening a path that came from a manifest.
+func ResolveInRoot(root, relPath string) (string, error) {
+	native := filepath.FromSlash(relPath)
+	if relPath == "" || filepath.IsAbs(native) || filepath.VolumeName(native) != "" {
+		return "", fmt.Errorf("path must be relative and root-local, got %q", relPath)
+	}
+	full := filepath.Join(root, filepath.Clean(native))
+	rel, err := filepath.Rel(root, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes project root: %q", relPath)
+	}
+	return full, nil
 }
 
 // DiscoverAreas returns the area directory names under .humify/areas, sorted.

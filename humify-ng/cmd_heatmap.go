@@ -77,8 +77,7 @@ func writeProject(root, target string, scores []heatmap.Score, g graph.Result, i
 		if err := os.MkdirAll(filepath.Join(layout.AreasDir(root), a.ID), 0o755); err != nil {
 			return err
 		}
-		rel := filepath.Join(layout.Dir, "areas", a.ID, a.ID+"-AUDIT-fragment.json")
-		expected = append(expected, manifest.Entry{AreaID: a.ID, Path: rel})
+		expected = append(expected, manifest.Entry{AreaID: a.ID, Path: layout.AreaFragmentRel(a.ID)})
 	}
 	if err := manifest.Write(root, manifest.Manifest{Fragments: expected}); err != nil {
 		return err
