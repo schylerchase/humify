@@ -22,6 +22,7 @@ type Area struct {
 	Kind       string      `json:"kind"` // "dir" or "file"
 	Root       string      `json:"root"` // path prefix this area owns
 	Files      []scan.File `json:"-"`
+	FilePaths  []string    `json:"files"` // exact files this area owns; persisted so the auditor reads precisely its slice, never a sibling area's god-file
 	FileCount  int         `json:"file_count"`
 	LOC        int         `json:"loc"`
 	MaxFileLOC int         `json:"max_file_loc"`
@@ -62,6 +63,7 @@ func bucket(f scan.File, godLOC int) (string, *Area) {
 
 func addFile(a *Area, f scan.File) {
 	a.Files = append(a.Files, f)
+	a.FilePaths = append(a.FilePaths, f.Rel)
 	a.FileCount++
 	a.LOC += f.LOC
 	a.Branches += f.Branches

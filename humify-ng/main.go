@@ -26,6 +26,7 @@ type options struct {
 	path   string
 	root   string
 	target string
+	runner string
 	godLOC int
 	json   bool
 }
@@ -43,6 +44,8 @@ func run(args []string) int {
 		return cmdStatus(opts)
 	case "heatmap":
 		return cmdHeatmap(opts)
+	case "audit":
+		return cmdAudit(opts)
 	case "consolidate":
 		return cmdConsolidate(opts)
 	case "", "help", "-h", "--help":
@@ -68,6 +71,8 @@ func parseArgs(args []string) (string, options) {
 			opts.root = strings.TrimPrefix(a, "--root=")
 		case strings.HasPrefix(a, "--target="):
 			opts.target = strings.TrimPrefix(a, "--target=")
+		case strings.HasPrefix(a, "--runner="):
+			opts.runner = strings.TrimPrefix(a, "--runner=")
 		case strings.HasPrefix(a, "--god-loc="):
 			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--god-loc=")); err == nil && n > 0 {
 				opts.godLOC = n
@@ -150,11 +155,12 @@ func pct(n, total int) string {
 }
 
 func printUsage() {
-	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-2)
+	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-3)
 
 usage:
   humify status      [--path=DIR] [--json]
   humify heatmap     --target=DIR [--root=DIR] [--god-loc=N] [--json]
+  humify audit       [--root=DIR] [--runner=dispatch] [--json]
   humify consolidate [--root=DIR] [--json]
 
 status       derive each area's lifecycle stage from on-disk artifacts under
@@ -162,10 +168,14 @@ status       derive each area's lifecycle stage from on-disk artifacts under
 heatmap      scan a target codebase, decompose into areas, build the dependency
              DAG, compute parallel waves, score risk, and bootstrap .humify/
              (HEATMAP.md, area scaffold, intel, AUDIT_MANIFEST) under --root.
+audit        plan the audit fan-out: derive which areas still need an auditor
+             (resumable from disk), then dispatch. --runner=dispatch (default)
+             writes one prompt per pending area under .humify/tmp/auditors/ for
+             the orchestrator to spawn; the gather is the consolidate stage.
 consolidate  gather all audit fragments named in the manifest into one AUDIT.md
              (dedup, cycle-detect, bucket conflicts), fail-closed on any pending
              or invalid fragment. Writes AUDIT.md + CONFLICTS.md.
 
-status exit codes:
-  0  clean   1  not a humify project   2  drift (an area is audit-incomplete)`)
+exit codes (status, audit, consolidate):
+  0  clean / dispatched   1  not a humify project / error   2  drift or pending`)
 }
