@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -55,7 +56,15 @@ func writePrompts(p Plan) ([]string, error) {
 	}
 	var prompts []string
 	for _, j := range p.Pending {
-		dest := filepath.Join(p.Root, j.PromptPath)
+		// Gate the write the same way every read path gates a manifest-derived
+		// path (see fragmentDone / consolidate): a hand-edited intel/areas.json
+		// can carry an area id with ".." segments, and PromptPath is derived from
+		// that id, so without this an escaping id would truncate a file OUTSIDE
+		// the project root. Fail closed instead.
+		dest, err := layout.ResolveInRoot(p.Root, j.PromptPath)
+		if err != nil {
+			return prompts, fmt.Errorf("auditor prompt path for area %q: %w", j.AreaID, err)
+		}
 		if err := os.WriteFile(dest, []byte(RenderPrompt(j, p.Target)), 0o644); err != nil {
 			return prompts, err
 		}

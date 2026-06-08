@@ -73,14 +73,40 @@ func auditReason(err error) string {
 	}
 }
 
-// auditData is the structured payload: the plan plus what the runner did.
+// auditData is the structured payload: the plan plus what the runner did. The
+// spawn fields are zero/absent for the dispatch runner (omitempty), so the JSON
+// shape only grows the spawn keys when an agent actually ran.
 type auditData struct {
 	audit.Plan
-	Runner  string   `json:"runner"`
-	Prompts []string `json:"prompts,omitempty"`
+	Runner    string   `json:"runner"`
+	Prompts   []string `json:"prompts,omitempty"`
+	Spawned   int      `json:"spawned,omitempty"`
+	Succeeded int      `json:"succeeded,omitempty"`
+	Failed    []string `json:"failed,omitempty"`
+}
+
+// auditResult builds the JSON envelope from a plan + runner outcome. It is the
+// single place auditData is assembled, so the dispatch and spawn paths cannot
+// drift in what they report.
+func auditResult(plan audit.Plan, out audit.Outcome, ok bool, reason string) output.Result {
+	return output.Result{
+		Ok:         ok,
+		ReasonCode: reason,
+		Data: auditData{
+			Plan: plan, Runner: out.Runner, Prompts: out.Prompts,
+			Spawned: out.Spawned, Succeeded: out.Succeeded, Failed: out.Failed,
+		},
+	}
 }
 
 func emitAudit(opts options, plan audit.Plan, out audit.Outcome) int {
+	// The spawn runner actually ran the agents, so its result is post-barrier
+	// truth (out.Succeeded/Failed), reported separately. Intel drift still wins:
+	// a corrupt bootstrap is reported here even if spawn ran, and the spawned
+	// fragments persist on disk for a re-run after heatmap is fixed.
+	if len(plan.Missing) == 0 && out.Spawned > 0 {
+		return emitSpawn(opts, plan, out)
+	}
 	ok := len(plan.Missing) == 0
 	code := exitOK
 	reason := "dispatch_ready"
@@ -103,11 +129,7 @@ func emitAudit(opts options, plan audit.Plan, out audit.Outcome) int {
 			Note: "spawn one read-only auditor per prompt, then consolidate"})
 	}
 	if opts.json {
-		output.EmitJSON(os.Stdout, output.Result{
-			Ok:         ok,
-			ReasonCode: reason,
-			Data:       auditData{Plan: plan, Runner: out.Runner, Prompts: out.Prompts},
-		})
+		output.EmitJSON(os.Stdout, auditResult(plan, out, ok, reason))
 		return code
 	}
 
@@ -126,6 +148,41 @@ func emitAudit(opts options, plan audit.Plan, out audit.Outcome) int {
 	printWaves(plan.Pending)
 	fmt.Println("next: spawn one read-only auditor per prompt (they are independent — auditing never writes source),")
 	fmt.Println("      then `humify consolidate` to merge fragments into AUDIT.md")
+	return code
+}
+
+// emitSpawn reports the spawn runner's post-barrier reconciliation. The agents
+// have already run, so success is the fragments that actually appeared
+// (out.Succeeded / out.Failed) — never the pre-run plan. An area whose agent ran
+// but left no valid fragment is real drift: surfaced (exit 2), not swallowed.
+// Re-running audit retries only the stragglers (BuildPlan skips audited areas).
+func emitSpawn(opts options, plan audit.Plan, out audit.Outcome) int {
+	ok, code, reason := true, exitOK, "spawn_complete"
+	if len(out.Failed) > 0 {
+		ok, code, reason = false, exitDrift, "spawn_incomplete"
+	}
+	if ok {
+		saveHandoff(plan.Root, handoff.Handoff{Stage: "audit", Action: "proceed",
+			NextCommand: "humify consolidate",
+			Note: fmt.Sprintf("%d auditor(s) spawned, all fragments present — gather into AUDIT.md", out.Spawned)})
+	} else {
+		saveHandoff(plan.Root, handoff.Handoff{Stage: "audit", Action: "blocked",
+			NextCommand: "humify audit",
+			Note: fmt.Sprintf("%d of %d auditor(s) wrote no valid fragment: %s — re-run audit to retry",
+				len(out.Failed), out.Spawned, strings.Join(out.Failed, ", "))})
+	}
+	if opts.json {
+		output.EmitJSON(os.Stdout, auditResult(plan, out, ok, reason))
+		return code
+	}
+	fmt.Printf("audit spawn: %s — %d spawned, %d valid fragment(s), %d failed\n",
+		out.Runner, out.Spawned, out.Succeeded, len(out.Failed))
+	if len(out.Failed) > 0 {
+		fmt.Printf("FAILED (no valid fragment after the agent ran): %s\n", strings.Join(out.Failed, ", "))
+		fmt.Println("re-run `humify audit --runner=spawn --agent-cmd=...` to retry the stragglers (audited areas are skipped)")
+		return code
+	}
+	fmt.Println("all auditors produced fragments — run `humify consolidate` to gather them into AUDIT.md")
 	return code
 }
 
