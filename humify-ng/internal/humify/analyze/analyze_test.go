@@ -176,6 +176,48 @@ func TestEmptyFileNotFlaggedStale(t *testing.T) {
 	}
 }
 
+func TestTodoProseMentionNotFlagged(t *testing.T) {
+	// A comment that describes TODO markers in prose is not itself a marker —
+	// this is the self-referential FP Humify hit on its own slop.go.
+	prose := "package x\n\n// scans for leftover TODO markers in comments\nvar y = 1\n"
+	if signalSet(inspectSrc("p.go", "go", prose))["todo_marker"] {
+		t.Error("a mid-sentence prose mention of TODO must not be flagged as a marker")
+	}
+	// Documentation that names the markers as a slash-list (the detector's own
+	// doc style) is not a marker — keyword followed by "/" or ")", not ":"/"(".
+	selfdoc := "package x\n\n// the markers (TODO/FIXME/XXX/HACK) we detect\nvar y = 1\n"
+	if signalSet(inspectSrc("p.go", "go", selfdoc))["todo_marker"] {
+		t.Error("a slash-separated list naming the markers is documentation, not a marker")
+	}
+	// Conventional markers — leading the comment, or tag-punctuated — still fire.
+	for _, src := range []string{
+		"package x\n\n// TODO fix this\nvar y = 1\n",
+		"package x\n\n// FIXME: broken\nvar y = 1\n",
+		"package x\n\n// HACK(bob) workaround\nvar y = 1\n",
+		"package x\n\n// see the TODO: above\nvar y = 1\n",
+	} {
+		if !signalSet(inspectSrc("p.go", "go", src))["todo_marker"] {
+			t.Errorf("a real marker must still be flagged: %q", src)
+		}
+	}
+}
+
+func TestVagueNameSkipsIdiomaticResultAndItem(t *testing.T) {
+	// Result/Item are idiomatic, package-qualified Go names (scan.Result), not slop.
+	for _, src := range []string{
+		"package scan\n\ntype Result struct{ N int }\n",
+		"package plan\n\ntype Item struct{ ID string }\n",
+	} {
+		if signalSet(inspectSrc("scan.go", "go", src))["vague_name"] {
+			t.Errorf("Result/Item must not be flagged vague: %q", src)
+		}
+	}
+	// Genuinely vague declarations are still flagged.
+	if !signalSet(inspectSrc("svc.go", "go", "package x\n\ntype Manager struct{}\n"))["vague_name"] {
+		t.Error("Manager is still a vague name and must be flagged")
+	}
+}
+
 func inspectSrc(path, lang, src string) []Finding {
 	infos := scanLines(src, lang)
 	return inspect(path, lang, infos, splitLines(src), measureFrom(src, infos, lang), Defaults())

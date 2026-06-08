@@ -52,8 +52,10 @@ func metricFindings(path string, m Metrics, cfg Config) []Finding {
 
 // vagueNames are identifiers that, used as a declared symbol, signal an unnamed
 // responsibility — the classic shape of machine-generated filler.
+// "result" and "item" are deliberately absent: in most languages they are
+// idiomatic, package-qualified names (scan.Result, plan.Item), not slop.
 var vagueNames = map[string]bool{
-	"data": true, "result": true, "item": true, "thing": true, "things": true,
+	"data": true, "thing": true, "things": true,
 	"manager": true, "processor": true, "handler": true, "helper": true,
 	"helpers": true, "util": true, "utils": true, "foo": true, "bar": true,
 	"baz": true, "stuff": true, "misc": true, "dostuff": true, "dosomething": true,
@@ -94,7 +96,11 @@ func nameFindings(path, lang string, infos []lineInfo, raw []string) []Finding {
 }
 
 var (
-	todoRe        = regexp.MustCompile(`\b(TODO|FIXME|XXX|HACK)\b`)
+	// A real leftover marker (TODO/FIXME/XXX/HACK) either leads the comment text
+	// or is tag-punctuated — the keyword immediately followed by a colon or open
+	// paren. A bare mention of the word mid-sentence is prose, not a marker.
+	todoLeadRe    = regexp.MustCompile(`^(TODO|FIXME|XXX|HACK)\b`)
+	todoTagRe     = regexp.MustCompile(`\b(TODO|FIXME|XXX|HACK)\s*[:(]`)
 	emptyCatchRe  = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*\}`)
 	catchOpenRe   = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*$`)
 	bareExceptRe  = regexp.MustCompile(`^\s*except\s*:\s*$`)
@@ -112,7 +118,7 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 	var out []Finding
 	for i, in := range infos {
 		ev := strings.TrimSpace(raw[i])
-		if loc := todoRe.FindString(in.comment); loc != "" {
+		if loc := todoMarker(in.comment); loc != "" {
 			out = append(out, mark("maintainability", "todo_marker", path, i+1, "info", "low", ev,
 				"Leftover "+loc+" marker — resolve it or convert it into a tracked task; unfinished markers often mark machine-stubbed code."))
 		}
@@ -140,6 +146,22 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 		}
 	}
 	return out
+}
+
+// todoMarker returns the marker keyword (TODO/FIXME/XXX/HACK) when the comment
+// carries a real leftover marker — one that leads the comment text (after
+// whitespace and any block-comment glyph) or is tag-punctuated (keyword then a
+// colon or open paren) — or "" when the keyword only appears in prose. comment
+// is the text after the line-comment leader, so it may retain leading whitespace.
+func todoMarker(comment string) string {
+	body := strings.TrimLeft(comment, " \t*-")
+	if m := todoLeadRe.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	if m := todoTagRe.FindStringSubmatch(comment); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // swallowed builds the standard swallowed-error finding.
