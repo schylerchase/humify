@@ -3,6 +3,7 @@ package apply
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -106,6 +107,65 @@ func TestApplyUnknownItemErrors(t *testing.T) {
 	root, p := buildRepo(t)
 	if _, err := Apply(root, p, "HMF-999", false, true, time.Now()); err == nil {
 		t.Error("apply on an unknown plan id must error")
+	}
+}
+
+// TestApplyRollsBackOnRegression is the end-to-end proof of apply's safety
+// contract: a quarantine that breaks the build is caught by re-running validation
+// and fully reverted. The target is a real Go module whose untitled.go — flagged
+// stale by name yet compiled — defines a symbol main.go calls, so quarantining it
+// turns a passing build into a failing one. Requires the go toolchain.
+func TestApplyRollsBackOnRegression(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a real Go module and runs the go toolchain")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module rollbackdemo\n\ngo 1.26\n")
+	writeFile(t, root, "main.go", "package main\n\nfunc main() { println(Greeting()) }\n")
+	// "untitled" is flagged stale by name, but the .go file is compiled and
+	// load-bearing, so removing it breaks the build — the adversarial case.
+	writeFile(t, root, "untitled.go", "package main\n\nfunc Greeting() string { return \"hi\" }\n")
+
+	a, err := analyze.Run(root, analyze.Defaults())
+	if err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	item, ok := findSignal(plan.Build(a), "stale_file")
+	if !ok {
+		t.Fatal("expected a stale_file quarantine item for untitled.go")
+	}
+
+	// Precondition: the baseline genuinely passes, so a post-failure is a true
+	// regression and not a pre-existing breakage.
+	if base, _ := verify.Run(root, time.Now()); !base.Validated || !base.Passed {
+		t.Fatalf("baseline must validate and pass; got validated=%v passed=%v", base.Validated, base.Passed)
+	}
+
+	res, err := Apply(root, plan.Build(a), item.ID, false, true, time.Now())
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if !res.RolledBack {
+		t.Fatalf("a build-breaking quarantine must roll back; got %+v", res)
+	}
+	if res.Applied {
+		t.Error("a rolled-back apply must not report Applied")
+	}
+	if !res.Validated {
+		t.Error("verify ran the go toolchain, so Validated must be true")
+	}
+	// A rollback leaves no trace: file restored, quarantine empty, no manifest.
+	if !isFile(filepath.Join(root, "untitled.go")) {
+		t.Error("untitled.go must be restored to its original location")
+	}
+	if isFile(filepath.Join(root, ".humify", "delete-me", item.ID, "untitled.go")) {
+		t.Error("the quarantined copy must be removed on rollback")
+	}
+	if isFile(filepath.Join(root, ".humify", "delete-me", item.ID, "manifest.json")) {
+		t.Error("no manifest must be written when the change is rolled back")
 	}
 }
 

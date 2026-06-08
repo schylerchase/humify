@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -53,6 +54,38 @@ func TestProductCLIFlow(t *testing.T) {
 	}
 	if code := runSilenced(t, "doctor", root); code != exitOK {
 		t.Fatalf("doctor exit = %d", code)
+	}
+}
+
+// TestApplyExit2OnRollback proves the exit code end-to-end through the real CLI:
+// when a quarantine breaks the build, apply rolls back and the binary exits 2
+// (drift) — the only apply path that returns exitDrift. Requires the go toolchain
+// because verify runs `go build/vet/test`.
+func TestApplyExit2OnRollback(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the go toolchain via verify")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	root := t.TempDir()
+	writeRepoFile(t, root, "go.mod", "module rollbackcli\n\ngo 1.26\n")
+	writeRepoFile(t, root, "main.go", "package main\n\nfunc main() { println(Greeting()) }\n")
+	// Flagged stale by name, but compiled and referenced by main.go.
+	writeRepoFile(t, root, "untitled.go", "package main\n\nfunc Greeting() string { return \"hi\" }\n")
+
+	if code := runSilenced(t, "analyze", root); code != exitOK {
+		t.Fatalf("analyze exit = %d", code)
+	}
+	if code := runSilenced(t, "plan", root); code != exitOK {
+		t.Fatalf("plan exit = %d", code)
+	}
+	// HMF-001 is the stale_file quarantine; applying it breaks the build → exit 2.
+	if code := runSilenced(t, "apply", "--target", "HMF-001", "--yes", root); code != exitDrift {
+		t.Fatalf("apply --yes exit = %d, want exitDrift(%d)", code, exitDrift)
+	}
+	if !pathThere(filepath.Join(root, "untitled.go")) {
+		t.Error("untitled.go must be restored after the rollback")
 	}
 }
 
