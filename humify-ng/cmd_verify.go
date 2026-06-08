@@ -14,7 +14,7 @@ import (
 // every stage in order. Exit 0 when the checked gate(s) pass, 2 on an incomplete
 // gate (so CI or a wrapping loop can branch on completeness without trusting an
 // agent's self-report), and 1 on a usage error (an unknown stage name).
-func cmdVerify(opts options) int {
+func untangleVerify(opts options) int {
 	root := resolveRoot(opts)
 	if opts.stage == "" {
 		// Stages before the first-incomplete one are genuinely complete; the

@@ -22,7 +22,7 @@ import (
 // round's actions: dispatch planners/checkers, or report converged/escalated.
 // Like audit, the binary only writes prompts — the orchestrator spawns the
 // dispatched agents and re-runs `humify plan` to take the next step.
-func cmdPlan(opts options) int {
+func untanglePlan(opts options) int {
 	root := opts.root
 	if root == "" {
 		if found, ok := layout.FindRoot(opts.path); ok {

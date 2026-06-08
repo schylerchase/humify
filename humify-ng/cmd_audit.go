@@ -21,7 +21,7 @@ import (
 // are the separate `humify consolidate` stage. Dispatching is a success (exit
 // 0) even when areas remain pending — work to do is not a failure. Manifest/
 // intel drift (a manifest area absent from intel) is corruption and exits 2.
-func cmdAudit(opts options) int {
+func untangleAudit(opts options) int {
 	root := opts.root
 	if root == "" {
 		if found, ok := layout.FindRoot(opts.path); ok {

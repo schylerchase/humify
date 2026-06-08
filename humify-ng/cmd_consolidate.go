@@ -15,7 +15,7 @@ import (
 // cmdConsolidate runs the fan-in engine: gather fragments -> dedup -> detect
 // cycles -> verify completeness -> write AUDIT.md + CONFLICTS.md. Exits 2 if any
 // area is pending or any blocker exists (the loop must keep auditing).
-func cmdConsolidate(opts options) int {
+func untangleConsolidate(opts options) int {
 	root := opts.root
 	if root == "" {
 		if found, ok := layout.FindRoot(opts.path); ok {

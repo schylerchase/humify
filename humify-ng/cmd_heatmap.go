@@ -19,7 +19,7 @@ import (
 // cmdHeatmap scans a target codebase and bootstraps a .humify/ project:
 // decomposition -> dependency DAG -> waves -> risk scores -> HEATMAP.md +
 // area scaffold + intel. Pure deterministic code; no agents.
-func cmdHeatmap(opts options) int {
+func untangleHeatmap(opts options) int {
 	if opts.target == "" {
 		return fail(opts, "missing_target", exitError, "heatmap requires --target=DIR")
 	}

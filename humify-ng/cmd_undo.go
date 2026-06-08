@@ -15,7 +15,7 @@ import (
 // the undo is itself reversible). On full success it clears the commit log so a
 // second undo does not double-revert. A revert that conflicts stops the run with
 // the offending commit, leaving the repo for the user to resolve.
-func cmdUndo(opts options) int {
+func untangleUndo(opts options) int {
 	root := opts.root
 	if root == "" {
 		if found, ok := layout.FindRoot(opts.path); ok {

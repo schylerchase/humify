@@ -19,7 +19,7 @@ import (
 // from on-disk artifacts; the one-shot HANDOFF cursor only enriches it. A stale
 // cursor — left by a command whose dispatched agents have since advanced the
 // disk — can therefore never make resume wrong.
-func cmdResume(opts options) int {
+func untangleResume(opts options) int {
 	root := resolveRoot(opts)
 	step := pipeline.Next(root)
 

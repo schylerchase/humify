@@ -1,7 +1,12 @@
-// Command humify-ng is a massive-codebase untangler that owns its
-// orchestration loop in deterministic code (the agent is a worker it calls,
-// not the orchestrator). Stage 1 ships `status`: it derives each area's
-// pipeline stage from on-disk artifacts and exits non-zero on drift.
+// Command humify reviews a target codebase for AI-generated / AI-degraded code
+// smells, scores its human maintainability, and produces a prioritized, evidence-
+// backed refactor plan — analyzing and planning before it ever changes source.
+//
+// The primary commands are analyze, plan, verify, apply, status, and doctor, with
+// JSON state under .humify/ as the control plane. The original massive-codebase
+// "untangler" workflow (heatmap/audit/consolidate/...) is preserved under the
+// `humify untangle <stage>` namespace so its commands do not collide with the
+// product surface.
 package main
 
 import (
@@ -27,16 +32,21 @@ const (
 type options struct {
 	path       string
 	root       string
-	target     string
+	target     string // heatmap target dir, OR the HMF-### plan item for apply
 	runner     string
 	testCmd    string
 	agentCmd   string // spawn runner: agent command (prompt piped on stdin)
-	stage      string // second positional, e.g. `verify <stage>`
+	stage      string // untangle verify <stage>
+	configPath string // explicit humify.config.json path (product commands)
+	args       []string
 	godLOC     int
 	maxReplans int
 	jobs       int           // spawn runner: max concurrent agents
 	timeout    time.Duration // spawn runner: per-agent wall-clock cap (0 → runner default)
 	json       bool
+	yes        bool // apply: confirm a source-changing action
+	dryRun     bool // apply: describe without changing
+	markdown   bool // product commands: also write the optional markdown report
 }
 
 const defaultGodLOC = 1500
@@ -48,26 +58,20 @@ func main() {
 func run(args []string) int {
 	cmd, opts := parseArgs(args)
 	switch cmd {
-	case "status":
-		return cmdStatus(opts)
-	case "heatmap":
-		return cmdHeatmap(opts)
-	case "audit":
-		return cmdAudit(opts)
-	case "consolidate":
-		return cmdConsolidate(opts)
+	case "analyze":
+		return cmdAnalyze(opts)
 	case "plan":
 		return cmdPlan(opts)
-	case "execute":
-		return cmdExecute(opts)
-	case "patchlog":
-		return cmdPatchlog(opts)
-	case "undo":
-		return cmdUndo(opts)
-	case "resume":
-		return cmdResume(opts)
 	case "verify":
 		return cmdVerify(opts)
+	case "apply":
+		return cmdApply(opts)
+	case "status":
+		return cmdStatus(opts)
+	case "doctor":
+		return cmdDoctor(opts)
+	case "untangle":
+		return runUntangle(opts)
 	case "", "help", "-h", "--help":
 		printUsage()
 		return exitOK
@@ -78,49 +82,114 @@ func run(args []string) int {
 	}
 }
 
+// runUntangle dispatches the preserved massive-codebase workflow: the stage name
+// is the first positional after `untangle` (e.g. `humify untangle heatmap`).
+func runUntangle(opts options) int {
+	stage := ""
+	if len(opts.args) > 0 {
+		stage = opts.args[0]
+	}
+	switch stage {
+	case "status":
+		if len(opts.args) > 1 && opts.path == "." {
+			opts.path = opts.args[1]
+		}
+		return untangleStatus(opts)
+	case "heatmap":
+		return untangleHeatmap(opts)
+	case "audit":
+		return untangleAudit(opts)
+	case "consolidate":
+		return untangleConsolidate(opts)
+	case "plan":
+		return untanglePlan(opts)
+	case "execute":
+		return untangleExecute(opts)
+	case "patchlog":
+		return untanglePatchlog(opts)
+	case "undo":
+		return untangleUndo(opts)
+	case "resume":
+		return untangleResume(opts)
+	case "verify":
+		if len(opts.args) > 1 {
+			opts.stage = opts.args[1]
+		}
+		return untangleVerify(opts)
+	case "", "help", "-h", "--help":
+		printUntangleUsage()
+		return exitOK
+	default:
+		fmt.Fprintf(os.Stderr, "unknown untangle stage: %s\n\n", stage)
+		printUntangleUsage()
+		return exitError
+	}
+}
+
+// parseArgs parses flags and positionals. Value flags accept both `--flag=value`
+// and `--flag value`; the first bare token is the command and the rest are
+// positionals (opts.args), interpreted per command. Unknown flags are ignored.
 func parseArgs(args []string) (string, options) {
 	opts := options{path: ".", godLOC: defaultGodLOC, jobs: 4}
 	var cmd string
-	for _, a := range args {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		name, eqVal, hasEq := strings.Cut(a, "=")
+		value := func() string {
+			if hasEq {
+				return eqVal
+			}
+			if i+1 < len(args) {
+				i++
+				return args[i]
+			}
+			return ""
+		}
 		switch {
 		case a == "--json":
 			opts.json = true
-		case strings.HasPrefix(a, "--path="):
-			opts.path = strings.TrimPrefix(a, "--path=")
-		case strings.HasPrefix(a, "--root="):
-			opts.root = strings.TrimPrefix(a, "--root=")
-		case strings.HasPrefix(a, "--target="):
-			opts.target = strings.TrimPrefix(a, "--target=")
-		case strings.HasPrefix(a, "--runner="):
-			opts.runner = strings.TrimPrefix(a, "--runner=")
-		case strings.HasPrefix(a, "--test-cmd="):
-			opts.testCmd = strings.TrimPrefix(a, "--test-cmd=")
-		case strings.HasPrefix(a, "--agent-cmd="):
-			opts.agentCmd = strings.TrimPrefix(a, "--agent-cmd=")
-		case strings.HasPrefix(a, "--jobs="):
-			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--jobs=")); err == nil && n > 0 {
-				opts.jobs = n
-			}
-		case strings.HasPrefix(a, "--timeout="):
-			if d, err := time.ParseDuration(strings.TrimPrefix(a, "--timeout=")); err == nil && d > 0 {
-				opts.timeout = d
-			}
-		case strings.HasPrefix(a, "--god-loc="):
-			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--god-loc=")); err == nil && n > 0 {
+		case a == "--yes" || a == "-y":
+			opts.yes = true
+		case a == "--dry-run":
+			opts.dryRun = true
+		case a == "--markdown":
+			opts.markdown = true
+		case name == "--path":
+			opts.path = value()
+		case name == "--root":
+			opts.root = value()
+		case name == "--target":
+			opts.target = value()
+		case name == "--runner":
+			opts.runner = value()
+		case name == "--test-cmd":
+			opts.testCmd = value()
+		case name == "--agent-cmd":
+			opts.agentCmd = value()
+		case name == "--config":
+			opts.configPath = value()
+		case name == "--god-loc":
+			if n, err := strconv.Atoi(value()); err == nil && n > 0 {
 				opts.godLOC = n
 			}
-		case strings.HasPrefix(a, "--max-replans="):
-			if n, err := strconv.Atoi(strings.TrimPrefix(a, "--max-replans=")); err == nil && n > 0 {
+		case name == "--max-replans":
+			if n, err := strconv.Atoi(value()); err == nil && n > 0 {
 				opts.maxReplans = n
 			}
-		case !strings.HasPrefix(a, "-"):
-			// First bare token is the command; a second (e.g. `verify <stage>`)
-			// is captured as the stage argument.
-			if cmd == "" {
-				cmd = a
-			} else if opts.stage == "" {
-				opts.stage = a
+		case name == "--jobs":
+			if n, err := strconv.Atoi(value()); err == nil && n > 0 {
+				opts.jobs = n
 			}
+		case name == "--timeout":
+			if d, err := time.ParseDuration(value()); err == nil && d > 0 {
+				opts.timeout = d
+			}
+		case strings.HasPrefix(a, "-"):
+			// Unknown flag — ignore so a typo never silently becomes a positional.
+		case cmd == "":
+			cmd = a
+		default:
+			opts.args = append(opts.args, a)
 		}
 	}
 	return cmd, opts
@@ -163,7 +232,7 @@ func resolveRoot(opts options) string {
 	return "."
 }
 
-func cmdStatus(opts options) int {
+func untangleStatus(opts options) int {
 	root, found := layout.FindRoot(opts.path)
 	if !found {
 		return fail(opts, "no_humify_dir", exitError,
@@ -234,53 +303,57 @@ func pct(n, total int) string {
 }
 
 func printUsage() {
-	fmt.Println(`humify-ng — massive-codebase untangler (stages 1-6)
+	fmt.Println(`humify — review a codebase for AI-slop and plan safe refactors
 
 usage:
-  humify status      [--path=DIR] [--json]
-  humify heatmap     --target=DIR [--root=DIR] [--god-loc=N] [--json]
-  humify audit       [--root=DIR] [--runner=dispatch] [--json]
-  humify consolidate [--root=DIR] [--json]
-  humify plan        [--root=DIR] [--max-replans=N] [--json]
-  humify execute     [--root=DIR] [--test-cmd=CMD] [--json]
-  humify patchlog    [--root=DIR] [--json]
-  humify undo        [--root=DIR] [--json]
-  humify resume      [--path=DIR] [--root=DIR] [--json]
-  humify verify      [STAGE] [--path=DIR] [--root=DIR] [--json]
+  humify analyze [PATH] [--config=FILE] [--markdown] [--json]
+  humify plan    [PATH] [--markdown] [--json]
+  humify verify  [PATH] [--json]
+  humify status  [PATH] [--json]
+  humify doctor  [PATH] [--json]
+  humify apply   --target HMF-### [--dry-run | --yes] [PATH]
+  humify untangle <stage> ...        (the massive-codebase workflow; see: humify untangle help)
 
-status       derive each area's lifecycle stage from on-disk artifacts under
-             .humify/areas/. Nothing is stored, so a reset loses no progress.
-heatmap      scan a target codebase, decompose into areas, build the dependency
-             DAG, compute parallel waves, score risk, and bootstrap .humify/
-             (HEATMAP.md, area scaffold, intel, AUDIT_MANIFEST) under --root.
-audit        plan the audit fan-out: derive which areas still need an auditor
-             (resumable from disk), then dispatch. --runner=dispatch (default)
-             writes one prompt per pending area under .humify/tmp/auditors/ for
-             the orchestrator to spawn; the gather is the consolidate stage.
-consolidate  gather all audit fragments named in the manifest into one AUDIT.md
-             (dedup, cycle-detect, bucket conflicts), fail-closed on any pending
-             or invalid fragment. Writes AUDIT.md + CONFLICTS.md.
-plan         advance the per-area plan convergence loop one round: dispatch
-             planners then adversarial plan-checkers, re-planning with feedback
-             until each finding-bearing area has an accepted PLAN.md (bounded by
-             --max-replans, default 3, with stall detection). Resumable; the
-             orchestrator spawns the dispatched agents and re-runs.
-execute      advance execution one dependency wave at a time: fork an isolated
-             git worktree+branch per planned slice and dispatch executors, then
-             on re-run run the fail-closed merge barrier, the --test-cmd gate,
-             and dispatch verifiers. Requires a git repo at --root.
-patchlog     deterministic roll-up of every executed area into PATCHLOG.md
-             (flips each to "patched"), with its merge commit and summary line.
-undo         revert execute's merge commits (newest first, via git revert, never
-             reset) and clear the commit log. Requires a git repo at --root.
-resume       name the next step in the pipeline (advisory — prints the command to
-             run, never runs it). Disk is authoritative; a HANDOFF.json cursor, if
-             present and still in agreement, adds the exact prompts to spawn.
-verify       re-run a stage's deterministic gate read-only without doing its work.
-             STAGE is one of: heatmap audit consolidate plan execute patchlog;
-             omit STAGE to check the whole pipeline. Exit 2 on any incomplete gate.
+PATH defaults to the current directory. Output JSON state is written under .humify/.
 
-exit codes (status, audit, consolidate, plan, execute, resume, verify):
-  0  clean / dispatched / converged / merged   1  not a humify project / error
-  2  drift, pending, escalated, blocked, or gate-failed`)
+analyze  scan the repo (honoring .gitignore/.humifyignore and skipping generated/
+         vendor/build dirs), detect stack/scripts/entry points, measure per-file
+         metrics, flag AI-slop signals with file+line evidence, and score five
+         health categories. Writes .humify/analysis.json. Read-only.
+plan     rank the findings into prioritized HMF-### refactor items with evidence,
+         risk, benefit, validation, and automation safety. Writes .humify/plan.json.
+         Runs analyze first if no analysis exists. Read-only.
+verify   detect and run the project's safe validation commands (test/build/lint/
+         typecheck) and record results in .humify/validation.json.
+status   print the current analysis/plan/validation state from .humify/ JSON.
+doctor   check Humify's wiring, the target path, git state, and tool availability.
+apply    the only command that changes source — and only conservatively. Defaults
+         to a dry run. Requires --target HMF-### and --yes to act, performs only
+         items marked safe (today: reversible file quarantine into
+         .humify/delete-me/<id>/ with a manifest), re-runs validation, and rolls
+         back on regression. Refuses broad/manual rewrites.
+
+safety: analyze, plan, verify, status, and doctor never modify target source.
+        apply quarantines (never deletes) and is reversible.
+exit codes: 0 ok · 1 error · 2 verify failed or apply rolled back`)
+}
+
+func printUntangleUsage() {
+	fmt.Println(`humify untangle — massive-codebase untangler (agent-orchestrated workflow)
+
+usage:
+  humify untangle status      [PATH]
+  humify untangle heatmap     --target=DIR [--root=DIR] [--god-loc=N] [--json]
+  humify untangle audit       [--root=DIR] [--runner=dispatch|spawn] [--agent-cmd=CMD] [--jobs=N] [--timeout=DUR] [--json]
+  humify untangle consolidate [--root=DIR] [--json]
+  humify untangle plan        [--root=DIR] [--max-replans=N] [--json]
+  humify untangle execute     [--root=DIR] [--test-cmd=CMD] [--json]
+  humify untangle patchlog    [--root=DIR] [--json]
+  humify untangle undo        [--root=DIR] [--json]
+  humify untangle resume      [--path=DIR] [--root=DIR] [--json]
+  humify untangle verify      [STAGE] [--path=DIR] [--root=DIR] [--json]
+
+This is the original LLM-auditor pipeline: it derives each area's stage from
+on-disk artifacts under .humify/areas/ and dispatches agents to audit, plan, and
+execute refactors wave by wave. Exit 2 signals drift/pending/blocked.`)
 }

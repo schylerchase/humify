@@ -22,7 +22,7 @@ import (
 // the build/test gate, and dispatches verifiers (merge phase). Like every other
 // stage the binary only orchestrates and writes prompts — the orchestrator
 // spawns the dispatched agents and re-runs to advance.
-func cmdExecute(opts options) int {
+func untangleExecute(opts options) int {
 	root := opts.root
 	if root == "" {
 		if found, ok := layout.FindRoot(opts.path); ok {

@@ -1,10 +1,26 @@
 package main
 
 import (
+	"os"
 	"testing"
 
 	"humify-ng/internal/pipeline"
 )
+
+// withSilencedStdout runs fn with os.Stdout redirected to the null device, so a
+// command's human/JSON output doesn't clutter the test log. emitAudit reads the
+// os.Stdout global at call time, so the swap takes effect.
+func withSilencedStdout(t *testing.T, fn func()) {
+	t.Helper()
+	old := os.Stdout
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open devnull: %v", err)
+	}
+	os.Stdout = devnull
+	defer func() { os.Stdout = old; devnull.Close() }()
+	fn()
+}
 
 // nextVerb/sameNextCommand decide whether a HANDOFF cursor agrees with the
 // disk-derived step — the gate that keeps a stale cursor from overriding disk.

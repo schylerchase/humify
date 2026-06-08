@@ -17,7 +17,7 @@ import (
 // each area on its own line, which is what package state reads to flip an area
 // to "patched". Per-area details carry the merge commit (from the commit log)
 // and the SUMMARY's first line, so the log is traceable back to git history.
-func cmdPatchlog(opts options) int {
+func untanglePatchlog(opts options) int {
 	root := opts.root
 	if root == "" {
 		if found, ok := layout.FindRoot(opts.path); ok {
