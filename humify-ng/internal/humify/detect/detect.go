@@ -46,7 +46,7 @@ const maxLargest = 10
 func Detect(res scan.Result, root string) Project {
 	p := Project{
 		Stack:          stackOf(res.Files),
-		PackageManager: packageManager(root),
+		PackageManager: packageManager(root, res.Files),
 		Scripts:        scriptsOf(root),
 		Configs:        configsOf(res.Files),
 		LargestFiles:   largestOf(res.Files),
@@ -85,20 +85,40 @@ var pmSignals = []struct{ file, manager string }{
 	{"package-lock.json", "npm"},
 	{"go.mod", "go modules"},
 	{"Cargo.toml", "cargo"},
+	{"uv.lock", "uv"},
 	{"poetry.lock", "poetry"},
 	{"requirements.txt", "pip"},
+	{"setup.py", "pip"},
+	{"pyproject.toml", "pip"}, // pyproject without a lockfile → pip
 	{"Gemfile", "bundler"},
 	{"pom.xml", "maven"},
 	{"build.gradle", "gradle"},
 	{"package.json", "npm"}, // package.json without a lockfile → npm by default
 }
 
-// packageManager returns the strongest package-manager signal at the repo root.
-func packageManager(root string) string {
+// packageManager returns the strongest package-manager signal: the highest-priority
+// manifest at the repo root, or — for a monorepo whose manifests live in
+// subdirectories — the shallowest matching manifest found anywhere in the scan.
+func packageManager(root string, files []scan.File) string {
 	for _, s := range pmSignals {
 		if exists(filepath.Join(root, s.file)) {
 			return s.manager
 		}
+	}
+	best, bestDepth := "", 1<<30
+	for _, f := range files {
+		base := filepath.Base(f.Path)
+		for _, s := range pmSignals {
+			if base == s.file {
+				if d := strings.Count(f.Path, "/"); d < bestDepth {
+					best, bestDepth = s.manager, d
+				}
+				break
+			}
+		}
+	}
+	if best != "" {
+		return best
 	}
 	return "unknown"
 }
@@ -246,7 +266,7 @@ func countsOf(files []scan.File) Counts {
 // isSource reports whether a file is human-authored program source (not a test,
 // config, or binary, and in a recognized language).
 func isSource(f scan.File) bool {
-	return !f.IsConfig && !f.IsTest && !f.Binary && f.Lang != ""
+	return !f.IsConfig && !f.IsTest && !f.Binary && !f.Minified && f.Lang != ""
 }
 
 func exists(path string) bool {

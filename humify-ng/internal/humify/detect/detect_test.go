@@ -57,6 +57,35 @@ func TestDetectGoProjectAndMakefile(t *testing.T) {
 	}
 }
 
+func TestDetectUvPython(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "pyproject.toml", "[project]\nname='x'\n")
+	write(t, root, "uv.lock", "version = 1\n")
+	write(t, root, "main.py", "print(1)\n")
+	if p := detectRoot(t, root); p.PackageManager != "uv" {
+		t.Errorf("package manager = %q, want uv (uv.lock present)", p.PackageManager)
+	}
+}
+
+func TestDetectPipFromPyproject(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "pyproject.toml", "[project]\nname='x'\n")
+	write(t, root, "app.py", "print(1)\n")
+	if p := detectRoot(t, root); p.PackageManager != "pip" {
+		t.Errorf("package manager = %q, want pip (pyproject without lockfile)", p.PackageManager)
+	}
+}
+
+func TestDetectMonorepoSubdirManager(t *testing.T) {
+	root := t.TempDir()
+	// No root manifest; the node project lives in a subdirectory (monorepo shape).
+	write(t, root, "apps/web/package.json", `{"name":"web"}`)
+	write(t, root, "apps/web/index.js", "console.log(1)\n")
+	if p := detectRoot(t, root); p.PackageManager != "npm" {
+		t.Errorf("monorepo package manager = %q, want npm (subdir package.json)", p.PackageManager)
+	}
+}
+
 func detectRoot(t *testing.T, root string) Project {
 	t.Helper()
 	res, err := scan.Walk(root, nil)
