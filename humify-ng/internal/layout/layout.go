@@ -143,6 +143,23 @@ func ResolveInRoot(root, relPath string) (string, error) {
 	return full, nil
 }
 
+// SafeAreaID reports whether id is safe to interpolate into a derived path. Area
+// ids are generated as NN-slug at heatmap time, but the manifest/fragment read
+// path does not re-validate them, so a hand-edited .humify (or a malicious target
+// repo shipping a pre-built one) could carry an id with path separators or ".."
+// segments. Anything that is not a single, non-dotted, separator-free component
+// is rejected so an id can never widen a derived path outside its directory.
+//
+// This is the id-level guard for paths ResolveInRoot cannot cover — notably
+// WorktreeDir, which deliberately writes a SIBLING of the repo (outside root), so
+// the id itself must be clean before it is joined.
+func SafeAreaID(id string) bool {
+	return id != "" && id != "." && id != ".." &&
+		!strings.ContainsAny(id, `/\`) &&
+		!strings.Contains(id, "..") &&
+		filepath.Clean(id) == id
+}
+
 // DiscoverAreas returns the area directory names under .humify/areas, sorted.
 // A missing areas directory is not an error; it yields no areas.
 func DiscoverAreas(root string) ([]string, error) {

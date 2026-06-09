@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -156,7 +155,7 @@ func TestSpawnEmptyPlan(t *testing.T) {
 func TestSpawnConcurrencyCap(t *testing.T) {
 	const jobs = 2
 	p := testPlan(t, "a1", "a2", "a3", "a4", "a5") // pending (5) > jobs (2)
-	arrived := make(chan struct{}, len(p.Pending))  // buffered: sends never block
+	arrived := make(chan struct{}, len(p.Pending)) // buffered: sends never block
 	release := make(chan struct{})
 	var mu sync.Mutex
 	inflight, maxSeen := 0, 0
@@ -203,39 +202,8 @@ func TestSpawnConcurrencyCap(t *testing.T) {
 	}
 }
 
-// TestShellExecTimeout proves the real (non-injected) path enforces the per-agent
-// wall-clock cap: an agent that hangs is killed at the deadline and returns an
-// error, so it lands in Failed rather than freezing the stage forever.
-func TestShellExecTimeout(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses sh/sleep")
-	}
-	start := time.Now()
-	err := shellExec(t.TempDir(), "sleep 5", "", 80*time.Millisecond)
-	if err == nil {
-		t.Fatal("expected a deadline error from a timed-out agent")
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("shellExec waited %v; the timeout was not enforced", elapsed)
-	}
-}
-
-// TestShellExecStdinAndDir proves the prompt is delivered on stdin (never the
-// command line — injection-safe) and the agent runs in the project root.
-func TestShellExecStdinAndDir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses sh")
-	}
-	dir := t.TempDir()
-	const msg = "the-prompt-on-stdin"
-	if err := shellExec(dir, "cat > out.txt", msg, 5*time.Second); err != nil {
-		t.Fatalf("shellExec: %v", err)
-	}
-	got, err := os.ReadFile(filepath.Join(dir, "out.txt"))
-	if err != nil {
-		t.Fatalf("read out.txt (cwd not set to dir?): %v", err)
-	}
-	if string(got) != msg {
-		t.Fatalf("stdin not piped: got %q want %q", got, msg)
-	}
-}
+// The low-level shell behaviors (per-agent timeout kill, stdin delivery, cwd) now
+// live in internal/spawn's TestShellExec* — SpawnRunner delegates to spawn.Run,
+// so those are tested once at the primitive rather than re-proven through every
+// adapter. The cap test below stays here to prove the adapter wires concurrency
+// through correctly.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,13 @@ import (
 	"humify-ng/internal/output"
 	"humify-ng/internal/plan"
 	"humify-ng/internal/plancheck"
+	"humify-ng/internal/spawn"
 )
+
+// errAuditIncomplete marks a plan round refused because the audit/consolidate
+// stage has not finished. The manual command maps it to exit 2 (audit_incomplete);
+// the autonomous driver never sees it (pipeline.Next routes to consolidate first).
+var errAuditIncomplete = errors.New("audit incomplete")
 
 // cmdPlan advances the plan stage's convergence loop by one round. It reads the
 // consolidated findings (refusing to plan a half-audited project), derives each
@@ -31,53 +38,94 @@ func untanglePlan(opts options) int {
 			root = "."
 		}
 	}
+	d, _, nothing, err := planRound(root, opts.maxReplans)
+	if err != nil {
+		return fail(opts, planReason(err), planCode(err), err.Error())
+	}
+	if nothing {
+		return emitPlanNothing(opts, root)
+	}
+	return emitPlan(opts, root, d)
+}
+
+// planRound advances the plan convergence loop by one round: it derives the
+// round's Decision from on-disk observations, writes the dispatched planner/
+// checker prompts, persists the loop state, and returns the Decision plus the
+// spawn jobs the round dispatched (each cwd = root, prompt delivered on stdin).
+// It is the one round implementation both the manual `humify plan` command and
+// the autonomous driver advance through, so the two can never diverge in how a
+// round is computed or dispatched.
+//
+// nothing=true means no area has findings — the loop is vacuously converged. A
+// still-incomplete audit is refused with errAuditIncomplete (the manual command
+// surfaces it as exit 2; the driver is gated upstream by pipeline.Next, so it
+// never reaches a plan round with an unfinished audit).
+func planRound(root string, maxReplans int) (d plan.Decision, jobs []spawn.Job, nothing bool, err error) {
 	res, err := consolidate.Run(root)
 	if err != nil {
-		return fail(opts, consolidateReason(err), exitError, err.Error())
+		return d, nil, false, err
 	}
 	if len(res.Pending) > 0 {
-		return fail(opts, "audit_incomplete", exitDrift, fmt.Sprintf(
-			"audit incomplete: %d area(s) not consolidated — finish `humify audit` + `humify consolidate` first",
-			len(res.Pending)))
+		return d, nil, false, fmt.Errorf("%w: %d area(s) not consolidated — finish `humify audit` + `humify consolidate` first",
+			errAuditIncomplete, len(res.Pending))
 	}
 	in, err := intel.Load(root)
 	if err != nil {
-		reason := "intel_error"
-		if err == intel.ErrNotExist {
-			reason = "no_intel"
-		}
-		return fail(opts, reason, exitError, err.Error())
+		return d, nil, false, err
 	}
-
-	byArea := groupFindings(res.Findings)
 	targets := consolidate.FindingAreas(res)
 	if len(targets) == 0 {
-		return emitPlanNothing(opts, root)
+		return plan.Decision{Status: plan.StatusConverged}, nil, true, nil
 	}
 
 	st, err := plan.Load(root)
 	if err != nil {
-		return fail(opts, "state_error", exitError, "load loop state: "+err.Error())
+		return d, nil, false, fmt.Errorf("load loop state: %w", err)
 	}
-	if opts.maxReplans > 0 {
-		st.MaxReplans = opts.maxReplans
+	if maxReplans > 0 {
+		st.MaxReplans = maxReplans
 	}
 	st.Reconcile(targets)
 
-	d := plan.Decide(plan.Observe(root, targets), &st)
+	d = plan.Decide(plan.Observe(root, targets), &st)
 	// Dispatch (which deletes stale verdicts for re-plans) BEFORE persisting the
 	// bumped replan counters. A bumped counter must never reach disk while the
 	// stale verdict it assumes-deleted is still there: that pairing would make
 	// the next run false-stall (Replans>0 && Issues unchanged) and escalate an
 	// area that never actually re-planned. With save last, a failed/crashed
 	// dispatch simply leaves state un-bumped and the round replays cleanly.
-	if err := dispatchPlan(root, in.Target, in.AreasByID(), byArea, d); err != nil {
-		return fail(opts, "dispatch_error", exitError, "dispatch failed: "+err.Error())
+	jobs, err = dispatchPlan(root, in.Target, in.AreasByID(), groupFindings(res.Findings), d)
+	if err != nil {
+		return d, nil, false, fmt.Errorf("dispatch failed: %w", err)
 	}
 	if err := st.Save(root); err != nil {
-		return fail(opts, "state_error", exitError, "save loop state: "+err.Error())
+		return d, jobs, false, fmt.Errorf("save loop state: %w", err)
 	}
-	return emitPlan(opts, root, d)
+	return d, jobs, false, nil
+}
+
+// planReason maps a planRound error to the command's machine reason code,
+// preserving the distinctions JSON consumers branch on.
+func planReason(err error) string {
+	switch {
+	case errors.Is(err, errAuditIncomplete):
+		return "audit_incomplete"
+	case errors.Is(err, intel.ErrNotExist):
+		return "no_intel"
+	case errors.Is(err, consolidate.ErrNoManifest), errors.Is(err, consolidate.ErrEmptyManifest):
+		return consolidateReason(err)
+	default:
+		return "plan_error"
+	}
+}
+
+// planCode maps a planRound error to its exit code: an incomplete audit is drift
+// (exit 2, cleared by finishing audit); everything else is a hard error.
+func planCode(err error) int {
+	if errors.Is(err, errAuditIncomplete) {
+		return exitDrift
+	}
+	return exitError
 }
 
 // groupFindings flattens consolidated findings to each area that reported them.
@@ -92,24 +140,41 @@ func groupFindings(merged []consolidate.Merged) map[string][]plan.Finding {
 	return byArea
 }
 
-// dispatchPlan writes the prompts the round calls for. Re-plans read the prior
+// dispatchPlan writes the prompts the round calls for and returns them as spawn
+// jobs (each cwd = root, the rendered prompt on stdin) so the autonomous driver
+// runs the exact prompts it wrote without re-rendering. Re-plans read the prior
 // plan and verdict for feedback, then delete the stale verdict so the next round
 // re-checks the fresh plan rather than re-judging the old one.
-func dispatchPlan(root, target string, areas map[string]area.Area, byArea map[string][]plan.Finding, d plan.Decision) error {
+//
+// Planners and checkers never collide within a round (Decide puts each area in
+// at most one of PlanAreas/CheckAreas), so the returned job ids are unique and
+// the driver's per-id success check is unambiguous.
+func dispatchPlan(root, target string, areas map[string]area.Area, byArea map[string][]plan.Finding, d plan.Decision) ([]spawn.Job, error) {
+	// Area ids flow from the manifest/fragments, which are NOT charset-validated on
+	// the read path; an id with ".." or a separator would let the prompt write
+	// below escape the project root (the same hand-edited-.humify threat the audit
+	// stage guards via ResolveInRoot — see internal/audit/runner.go). Fail closed.
+	if err := guardAreaIDs(d.PlanAreas...); err != nil {
+		return nil, err
+	}
+	if err := guardAreaIDs(d.CheckAreas...); err != nil {
+		return nil, err
+	}
 	replan := map[string]bool{}
 	for _, id := range d.Replans {
 		replan[id] = true
 	}
 	if len(d.PlanAreas) > 0 {
 		if err := os.MkdirAll(filepath.Join(layout.TmpDir(root), "planners"), 0o755); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if len(d.CheckAreas) > 0 {
 		if err := os.MkdirAll(filepath.Join(layout.TmpDir(root), "plan-checkers"), 0o755); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	var jobs []spawn.Job
 	for _, id := range d.PlanAreas {
 		job := plan.PlannerJob{
 			AreaID: id, Target: target, Files: areas[id].FilePaths,
@@ -125,10 +190,12 @@ func dispatchPlan(root, target string, areas map[string]area.Area, byArea map[st
 			}
 			job.Feedback = fb
 		}
+		prompt := plan.RenderPlannerPrompt(job)
 		dest := filepath.Join(layout.TmpDir(root), "planners", id+".prompt.md")
-		if err := os.WriteFile(dest, []byte(plan.RenderPlannerPrompt(job)), 0o644); err != nil {
-			return err
+		if err := os.WriteFile(dest, []byte(prompt), 0o644); err != nil {
+			return nil, err
 		}
+		jobs = append(jobs, spawn.Job{ID: id, Dir: root, Prompt: prompt})
 		if replan[id] {
 			// Stale verdict already read for feedback; remove it so next round the
 			// fresh plan is re-checked instead of re-judged against the old verdict.
@@ -140,12 +207,14 @@ func dispatchPlan(root, target string, areas map[string]area.Area, byArea map[st
 			AreaID: id, Target: target,
 			PlanPath: layout.AreaPlanRel(id), CheckPath: layout.AreaPlanCheckRel(id),
 		}
+		prompt := plan.RenderCheckerPrompt(job)
 		dest := filepath.Join(layout.TmpDir(root), "plan-checkers", id+".prompt.md")
-		if err := os.WriteFile(dest, []byte(plan.RenderCheckerPrompt(job)), 0o644); err != nil {
-			return err
+		if err := os.WriteFile(dest, []byte(prompt), 0o644); err != nil {
+			return nil, err
 		}
+		jobs = append(jobs, spawn.Job{ID: id, Dir: root, Prompt: prompt})
 	}
-	return nil
+	return jobs, nil
 }
 
 func emitPlan(opts options, root string, d plan.Decision) int {

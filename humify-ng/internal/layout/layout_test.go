@@ -48,3 +48,27 @@ func TestResolveInRootRejectsDriveRelativeWindows(t *testing.T) {
 		t.Error("drive-relative escape accepted")
 	}
 }
+
+// TestSafeAreaID locks the id guard used before an area id is interpolated into a
+// derived path (WorktreeDir, prompt files). A real generated id (NN-slug) passes;
+// anything that could widen a path outside its directory is rejected.
+func TestSafeAreaID(t *testing.T) {
+	good := []string{"01-src", "12-handlers-api", "0-a"}
+	for _, id := range good {
+		if !SafeAreaID(id) {
+			t.Errorf("SafeAreaID(%q) = false; want true (a normal generated id)", id)
+		}
+	}
+	bad := []string{
+		"", ".", "..",
+		"../../../../tmp/pwned",
+		"a/b", `a\b`,
+		"..", "a..b", // any double-dot is rejected, belt-and-suspenders
+		"foo/", "/abs",
+	}
+	for _, id := range bad {
+		if SafeAreaID(id) {
+			t.Errorf("SafeAreaID(%q) = true; want false (it could escape a derived path)", id)
+		}
+	}
+}

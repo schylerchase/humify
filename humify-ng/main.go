@@ -47,6 +47,7 @@ type options struct {
 	yes        bool // apply: confirm a source-changing action
 	dryRun     bool // apply: describe without changing
 	markdown   bool // product commands: also write the optional markdown report
+	execute    bool // untangle run: opt in to the source-modifying execute stage
 }
 
 const defaultGodLOC = 1500
@@ -111,6 +112,8 @@ func runUntangle(opts options) int {
 		return untangleUndo(opts)
 	case "resume":
 		return untangleResume(opts)
+	case "run":
+		return untangleRun(opts)
 	case "verify":
 		if len(opts.args) > 1 {
 			opts.stage = opts.args[1]
@@ -154,6 +157,8 @@ func parseArgs(args []string) (string, options) {
 			opts.dryRun = true
 		case a == "--markdown":
 			opts.markdown = true
+		case a == "--execute":
+			opts.execute = true
 		case name == "--path":
 			opts.path = value()
 		case name == "--root":
@@ -352,8 +357,18 @@ usage:
   humify untangle undo        [--root=DIR] [--json]
   humify untangle resume      [--path=DIR] [--root=DIR] [--json]
   humify untangle verify      [STAGE] [--path=DIR] [--root=DIR] [--json]
+  humify untangle run         --agent-cmd=CMD [--execute] [--test-cmd=CMD] [--jobs=N] [--timeout=DUR] [--max-replans=N] [--root=DIR] [--json]
 
 This is the original LLM-auditor pipeline: it derives each area's stage from
 on-disk artifacts under .humify/areas/ and dispatches agents to audit, plan, and
-execute refactors wave by wave. Exit 2 signals drift/pending/blocked.`)
+execute refactors wave by wave. Exit 2 signals drift/pending/blocked.
+
+run is the autonomous driver: it walks the same next-step decision 'resume'
+prints and ACTS on it, spawning --agent-cmd (prompt piped on stdin) at each
+agent stage until the pipeline is done or blocked. By default it stops at
+plan-converged — audit→consolidate→plan only ever write under .humify/, never
+your source. Pass --execute to continue through execute (which forks worktrees,
+spawns executors that rewrite source, and auto-merges behind the merge barrier +
+optional --test-cmd gate) and patchlog. Autonomy over source is opt-in, like
+apply's --yes; undo reverts a wave's merges.`)
 }

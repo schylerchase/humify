@@ -21,12 +21,21 @@ import (
 // disk — can therefore never make resume wrong.
 func untangleResume(opts options) int {
 	root := resolveRoot(opts)
-	step := pipeline.Next(root)
+	step := nextActionable(root)
+	return emitResume(opts, step, reconcileHandoff(root, step))
+}
 
-	// Escalation guard: if plan is the next stage, a genuinely stuck area (replan
-	// budget exhausted, still unaccepted) must surface as blocked rather than have
-	// resume loop "run humify plan" forever. One read-only load, no replication of
-	// plan.Decide's stateful logic.
+// nextActionable is the one decision both `resume` (which prints it) and the
+// autonomous driver (which acts on it) consume: the disk-derived next step from
+// pipeline.Next, refined by the plan-escalation guard. pipeline.Next alone does
+// not know the replan budget, so without this guard an area that exhausted its
+// budget would read as "plan_pending" forever — resume would loop "run humify
+// plan" and the driver would re-spawn planners forever. Sharing one function is
+// what guarantees the advisory and acting surfaces can never disagree about
+// where the project stands or whether it is blocked. Read-only; no replication
+// of plan.Decide's stateful logic (escalatedAreas reads persisted loop state).
+func nextActionable(root string) pipeline.Step {
+	step := pipeline.Next(root)
 	if step.Stage == pipeline.StagePlan {
 		if esc := escalatedAreas(root); len(esc) > 0 {
 			step.Blocked = true
@@ -36,8 +45,7 @@ func untangleResume(opts options) int {
 				len(esc), strings.Join(esc, " "))
 		}
 	}
-
-	return emitResume(opts, step, reconcileHandoff(root, step))
+	return step
 }
 
 // reconcileHandoff consumes the one-shot cursor and returns a human note. It does
