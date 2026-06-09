@@ -30,6 +30,7 @@ type File struct {
 	IsTest   bool   `json:"is_test"`  // looks like a test file
 	IsConfig bool   `json:"is_config"`// looks like configuration
 	Binary   bool   `json:"binary"`   // non-text content; excluded from source metrics
+	Minified bool   `json:"minified"` // machine-minified/bundled; excluded from review
 }
 
 // Result is the outcome of a walk.
@@ -88,7 +89,25 @@ func classify(root, rel string) File {
 	}
 	f.IsTest = isTestPath(rel)
 	f.IsConfig = isConfigPath(rel)
+	f.Minified = !f.Binary && looksMinified(rel, f.Size, f.LOC)
 	return f
+}
+
+// minBytesPerLine is the average line length above which a file is treated as
+// machine-minified — hand-written code essentially never averages this many bytes
+// per line, but a minified bundle (one statement per megaline) far exceeds it.
+const minBytesPerLine = 400
+
+// looksMinified reports whether a file is machine-minified or bundled third-party
+// code: by a conventional name (*.min.*, *.bundle.js, *-min.js) or an average
+// bytes-per-line far beyond hand-written source. Such files are generated noise and
+// must not be reviewed or scored.
+func looksMinified(rel string, size int64, loc int) bool {
+	base := strings.ToLower(filepath.Base(rel))
+	if strings.Contains(base, ".min.") || strings.HasSuffix(base, ".bundle.js") || strings.HasSuffix(base, "-min.js") {
+		return true
+	}
+	return loc > 0 && size/int64(loc) >= minBytesPerLine
 }
 
 // readCapped reads up to maxReadBytes of a file.

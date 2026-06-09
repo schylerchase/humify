@@ -140,7 +140,7 @@ func reviewFiles(res scan.Result, cfg Config) ([]FileScore, []Finding) {
 	var files []FileScore
 	var findings []Finding
 	for _, f := range res.Files {
-		if f.IsConfig || f.IsTest || f.Binary || f.Lang == "" {
+		if f.IsConfig || f.IsTest || f.Binary || f.Minified || f.Lang == "" {
 			continue
 		}
 		content, err := os.ReadFile(f.Abs)

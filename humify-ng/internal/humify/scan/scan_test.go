@@ -3,6 +3,7 @@ package scan
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,6 +66,34 @@ func TestWalkHonorsHumifyignore(t *testing.T) {
 	if _, ok := files["src/real.ts"]; !ok {
 		t.Error("real.ts should be scanned")
 	}
+}
+
+func TestWalkFlagsMinified(t *testing.T) {
+	root := t.TempDir()
+	big := strings.Repeat("a;", 25000) // ~50 KB on one line
+	write(t, root, "libs/huge.js", big+"\n"+big+"\n")                                  // ~50 KB/line -> ratio heuristic
+	write(t, root, "libs/tiny.min.js", "var a=1;\n")                                   // tiny but *.min.js -> name heuristic
+	write(t, root, "src/app.js", strings.Repeat("const x = computeValue();\n", 300))   // ~26 b/l -> NOT minified
+
+	files := index(mustWalk(t, root))
+	if !files["libs/huge.js"].Minified {
+		t.Error("a high bytes-per-line file must be flagged minified")
+	}
+	if !files["libs/tiny.min.js"].Minified {
+		t.Error("a *.min.js file must be flagged minified by name")
+	}
+	if files["src/app.js"].Minified {
+		t.Error("normal short-line source must NOT be flagged minified")
+	}
+}
+
+func mustWalk(t *testing.T, root string) Result {
+	t.Helper()
+	res, err := Walk(root, nil)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	return res
 }
 
 func index(res Result) map[string]File {

@@ -109,12 +109,17 @@ func scanLines(content, lang string) []lineInfo {
 }
 
 // scanBrace tokenizes brace-family source, tracking block comments and multi-line
-// raw strings (backticks) across lines so their braces never reach the metrics.
+// strings across lines so their braces never reach the metrics. Backticks are Go
+// raw strings (no escapes) in most languages, but in JS/TS they are template
+// literals: `tmpl` enables escape (\`) handling and `${…}` interpolation, whose
+// embedded code IS measured (and whose braces must not be miscounted) — without it
+// a `String.raw` template would swallow the rest of the file and zero its metrics.
 func scanBrace(raw []string, lang string) []lineInfo {
 	token := lineCommentToken(lang)
 	allowBlock := lang != "sh" && lang != "ps1"
+	tmpl := lang == "js" || lang == "ts"
 	infos := make([]lineInfo, len(raw))
-	inBlock, inRaw := false, false
+	inBlock, inRaw, interp := false, false, 0
 	for i, line := range raw {
 		var code, comment strings.Builder
 		for j := 0; j < len(line); {
@@ -129,10 +134,47 @@ func scanBrace(raw []string, lang string) []lineInfo {
 					j = len(line)
 				}
 			case inRaw:
-				if k := strings.IndexByte(rest, '`'); k >= 0 {
-					inRaw, j = false, j+k+1
-				} else {
+				switch {
+				case tmpl && rest[0] == '\\': // escaped char inside a template literal
+					j += 2
+				case rest[0] == '`':
+					inRaw, j = false, j+1
+				case tmpl && strings.HasPrefix(rest, "${"): // interpolation → code mode
+					inRaw, interp, j = false, interp+1, j+2
+				default:
+					j++ // template/raw text — neither code nor comment
+				}
+			case interp > 0: // inside ${ ... }: real code, measured; brace-balanced
+				switch {
+				case rest[0] == '{':
+					interp++
+					code.WriteByte('{')
+					j++
+				case rest[0] == '}':
+					if interp--; interp == 0 {
+						inRaw = true // resume the surrounding template text
+					} else {
+						code.WriteByte('}')
+					}
+					j++
+				case allowBlock && strings.HasPrefix(rest, "/*"):
+					if k := strings.Index(rest[2:], "*/"); k >= 0 {
+						comment.WriteString(rest[2 : 2+k])
+						j += 2 + k + 2
+					} else {
+						comment.WriteString(rest[2:])
+						inBlock, j = true, len(line)
+					}
+				case strings.HasPrefix(rest, token):
+					comment.WriteString(rest[len(token):])
 					j = len(line)
+				case rest[0] == '"' || rest[0] == '\'':
+					j += skipString(rest)
+				case rest[0] == '`':
+					inRaw, j = true, j+1 // nested template inside interpolation
+				default:
+					code.WriteByte(rest[0])
+					j++
 				}
 			case allowBlock && strings.HasPrefix(rest, "/*"):
 				if k := strings.Index(rest[2:], "*/"); k >= 0 {
@@ -250,14 +292,17 @@ func braceSpans(code []string) (longest, longestLine, maxNesting, deepestLine in
 	return longest, longestLine, maxNesting, deepestLine
 }
 
-var defLine = regexp.MustCompile(`^(\s*)(async\s+)?def\s`)
+var (
+	defLine       = regexp.MustCompile(`^(\s*)(async\s+)?def\s`)
+	blockOpenerRe = regexp.MustCompile(`^(?:if|elif|else|for|while|with|try|except|finally|def|class|match|case|async)\b.*:\s*$`)
+)
 
 // indentSpans measures the longest def body (with its start line) and deepest
-// indentation (with its line) over code-only lines for indentation-structured
-// languages. Blank entries (comments, blanks, string interiors) are skipped, so
-// docstring indentation never inflates the result. Line numbers are 1-based.
+// block nesting (with its line) over code-only lines for indentation-structured
+// languages. Nesting counts enclosing block openers (lines ending in ':'), NOT raw
+// indentation, so a wrapped multi-line call argument never inflates depth. Blank
+// entries (comments, blanks, string interiors) are skipped. Line numbers are 1-based.
 func indentSpans(code []string) (longest, longestLine, maxNesting, deepestLine int) {
-	unit := indentUnit(code)
 	defIndent, defStart, lastBody := -1, -1, -1
 	closeDef := func(end int) {
 		if defStart >= 0 {
@@ -267,13 +312,20 @@ func indentSpans(code []string) (longest, longestLine, maxNesting, deepestLine i
 			defIndent, defStart = -1, -1
 		}
 	}
+	var openers []int // indents of the block openers strictly enclosing the line
 	for i, line := range code {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		indent := leadingCols(line)
-		if depth := indent/unit + 1; depth > maxNesting {
+		for len(openers) > 0 && indent <= openers[len(openers)-1] {
+			openers = openers[:len(openers)-1] // dedented out of these blocks
+		}
+		if depth := len(openers) + 1; depth > maxNesting {
 			maxNesting, deepestLine = depth, i+1
+		}
+		if blockOpenerRe.MatchString(strings.TrimSpace(line)) {
+			openers = append(openers, indent)
 		}
 		if defStart >= 0 && indent <= defIndent {
 			closeDef(lastBody)
@@ -285,24 +337,6 @@ func indentSpans(code []string) (longest, longestLine, maxNesting, deepestLine i
 	}
 	closeDef(lastBody)
 	return longest, longestLine, maxNesting, deepestLine
-}
-
-// indentUnit guesses the indentation width from the smallest positive indent among
-// code lines, defaulting to 4.
-func indentUnit(code []string) int {
-	unit := 0
-	for _, line := range code {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if c := leadingCols(line); c > 0 && (unit == 0 || c < unit) {
-			unit = c
-		}
-	}
-	if unit == 0 {
-		return 4
-	}
-	return unit
 }
 
 // leadingCols counts leading indentation columns (a tab counts as one).

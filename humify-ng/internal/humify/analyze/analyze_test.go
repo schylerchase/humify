@@ -58,6 +58,43 @@ func TestMeasureIndentPython(t *testing.T) {
 	}
 }
 
+func TestMeasureTemplateLiteralResumesCode(t *testing.T) {
+	// A JS template literal with ${} interpolation (braces inside) and an escaped
+	// backtick must NOT swallow the real function that follows it.
+	src := "const t = `a ${fn({k: 1})} b \\` c`\n\nfunction big() {\n\tif (a) {\n\t\tif (b) {\n\t\t\treturn 1\n\t\t}\n\t}\n}\n"
+	m := Measure(src, "js")
+	if m.LongestFunc < 6 {
+		t.Errorf("LongestFunc = %d; the function after the template must be measured", m.LongestFunc)
+	}
+	if m.MaxNesting < 3 {
+		t.Errorf("MaxNesting = %d; nesting inside the post-template function must be seen", m.MaxNesting)
+	}
+}
+
+func TestGoRawStringEndingInBackslashStillCloses(t *testing.T) {
+	// Go raw strings have no escapes: a backslash before the closing backtick is
+	// literal content, so the string must still close and the next func be measured.
+	src := "package x\n\nfunc a() { p := `C:\\` ; _ = p }\n\nfunc big() {\n\tif x {\n\t\tif y {\n\t\t\treturn\n\t\t}\n\t}\n}\n"
+	m := Measure(src, "go")
+	if m.MaxNesting < 3 {
+		t.Errorf("MaxNesting = %d; a Go raw string ending in backslash must not swallow the rest", m.MaxNesting)
+	}
+}
+
+func TestDeepNestingCountsBlocksNotIndent(t *testing.T) {
+	// Wrapped call args indented far past their block must not inflate nesting —
+	// only real block openers (lines ending in ':') count.
+	wrapped := "def f():\n    if a:\n        do(\n                    x,\n                    y,\n        )\n"
+	if m := Measure(wrapped, "py"); m.MaxNesting > 3 {
+		t.Errorf("MaxNesting = %d; wrapped args must not nest past def+if (~2-3)", m.MaxNesting)
+	}
+	// Genuine nesting is still measured.
+	nested := "def f():\n    if a:\n        for x in y:\n            if z:\n                w = 1\n"
+	if m := Measure(nested, "py"); m.MaxNesting < 4 {
+		t.Errorf("MaxNesting = %d; def>if>for>if is real depth, want >=4", m.MaxNesting)
+	}
+}
+
 func TestInspectFindsSlopSignals(t *testing.T) {
 	src := "package x\n\nfunc data() error {\n\t// TODO fix later\n\tif err != nil {\n\t}\n\treturn nil\n}\n"
 	got := signalSet(inspectSrc("svc/data.go", "go", src))
@@ -68,15 +105,91 @@ func TestInspectFindsSlopSignals(t *testing.T) {
 	}
 }
 
-func TestInspectPythonBroadAndSwallowed(t *testing.T) {
-	src := "def f():\n    try:\n        g()\n    except Exception:\n        pass\n"
-	got := signalSet(inspectSrc("f.py", "py", src))
-	if !got["broad_catch"] {
-		t.Errorf("expected broad_catch, got %v", got)
+func TestInspectPythonBroadVsSwallowedAreExclusive(t *testing.T) {
+	// `except Exception: pass` is an empty broad catch — it must be swallowed_error
+	// ONLY, never both (the AdminMigrationTool double-count bug).
+	empty := signalSet(inspectSrc("f.py", "py", "def f():\n    try:\n        g()\n    except Exception:\n        pass\n"))
+	if !empty["swallowed_error"] {
+		t.Errorf("empty broad catch should be swallowed_error, got %v", empty)
 	}
-	if !got["swallowed_error"] {
-		t.Errorf("expected swallowed_error (except: pass), got %v", got)
+	if empty["broad_catch"] {
+		t.Errorf("an empty broad catch must NOT also be broad_catch (double-count), got %v", empty)
 	}
+	// A broad catch with a real body is broad_catch, not swallowed.
+	handled := signalSet(inspectSrc("g.py", "py", "def f():\n    try:\n        g()\n    except Exception:\n        log(e)\n"))
+	if !handled["broad_catch"] {
+		t.Errorf("broad catch with a body should be broad_catch, got %v", handled)
+	}
+	if handled["swallowed_error"] {
+		t.Errorf("a handled broad catch must not be swallowed_error, got %v", handled)
+	}
+}
+
+func TestSwallowedRespectsIntent(t *testing.T) {
+	// A bare empty catch with no explanation is still a real swallow.
+	if !signalSet(inspectSrc("a.js", "js", "function f(){ try{g()}catch(e){} }\n"))["swallowed_error"] {
+		t.Error("an undocumented empty catch must still be flagged")
+	}
+	// Documented (inline comment) or suppressed catches are intentional — skip them.
+	cases := []struct{ path, lang, src string }{
+		{"b.js", "js", "function f(){ try{g()}catch(e){ /* localStorage may be disabled */ } }\n"},
+		{"c.py", "py", "def f():\n    try:\n        g()\n    except Exception:  # noqa: S110\n        pass\n"},
+	}
+	for _, c := range cases {
+		if signalSet(inspectSrc(c.path, c.lang, c.src))["swallowed_error"] {
+			t.Errorf("a documented/suppressed catch must not be flagged: %q", c.src)
+		}
+	}
+	// A NARROW typed except + pass is deliberate narrow handling, not a swallow.
+	narrow := "def f():\n    try:\n        g()\n    except json.JSONDecodeError:\n        pass\n"
+	if signalSet(inspectSrc("d.py", "py", narrow))["swallowed_error"] {
+		t.Error("a narrow typed `except SomeError: pass` must not be flagged swallowed")
+	}
+}
+
+func TestNoisyCommentSkipsSectionLabels(t *testing.T) {
+	// Real section-header / divider comments from the validated repos — all FPs.
+	for _, c := range []string{
+		"package x\n\n// State\nstate := 1\n",
+		"package x\n\n// SQL Servers\nsqlServers := list()\n",
+		"package x\n\n// ── Group card ──\ngroupCard := 1\n",
+		"package x\n\n// --- Common flags ---\ncommonFlags := 1\n",
+		"package x\n\n// Tags\ntags := 1\n",
+	} {
+		if signalSet(inspectSrc("x.go", "go", c))["noisy_comment"] {
+			t.Errorf("section label/divider must not be noisy_comment: %q", c)
+		}
+	}
+	// A bare camelCase restatement is still noise.
+	if !signalSet(inspectSrc("x.go", "go", "package x\n\n// getName\nfunc getName() {}\n"))["noisy_comment"] {
+		t.Error("a bare camelCase comment restating the next identifier is still noise")
+	}
+}
+
+func TestVagueNameDoesNotFlagFilenames(t *testing.T) {
+	// utils/helper/misc are idiomatic module names — flagging the filename is a FP.
+	for _, p := range []string{"src/utils.js", "crates/agent/src/helper.rs", "routes/misc.js"} {
+		lang := "js"
+		if filepathExt(p) == ".rs" {
+			lang = "rs"
+		}
+		if signalSet(inspectSrc(p, lang, "package x\n\nfunc ok() {}\n"))["vague_name"] {
+			t.Errorf("an idiomatic filename must not be flagged vague: %q", p)
+		}
+	}
+	// A vague *declaration* inside a file is still flagged.
+	if !signalSet(inspectSrc("svc.go", "go", "package x\n\ntype Manager struct{}\n"))["vague_name"] {
+		t.Error("a vague declaration is still flagged")
+	}
+}
+
+func filepathExt(p string) string {
+	for i := len(p) - 1; i >= 0 && p[i] != '/'; i-- {
+		if p[i] == '.' {
+			return p[i:]
+		}
+	}
+	return ""
 }
 
 func TestInspectEmptyJSCatch(t *testing.T) {
@@ -221,6 +334,32 @@ func TestVagueNameSkipsIdiomaticResultAndItem(t *testing.T) {
 func inspectSrc(path, lang, src string) []Finding {
 	infos := scanLines(src, lang)
 	return inspect(path, lang, infos, splitLines(src), measureFrom(src, infos, lang), Defaults())
+}
+
+func TestMinifiedFileNotReviewed(t *testing.T) {
+	root := t.TempDir()
+	// Same code in a minified lib and in real source; only the real one is reviewed.
+	body := "function f(){try{g()}catch(e){}}\n"
+	writeFile(t, root, "libs/x.min.js", body)
+	writeFile(t, root, "app.js", body)
+	a, err := Run(root, Defaults())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, f := range a.Findings {
+		if f.File == "libs/x.min.js" {
+			t.Errorf("a minified file must not be reviewed; got %s on it", f.Signal)
+		}
+	}
+	reviewedApp := false
+	for _, f := range a.Findings {
+		if f.File == "app.js" {
+			reviewedApp = true
+		}
+	}
+	if !reviewedApp {
+		t.Error("real source app.js should still be reviewed (sanity)")
+	}
 }
 
 func TestRunScoresAndPersistsShape(t *testing.T) {
