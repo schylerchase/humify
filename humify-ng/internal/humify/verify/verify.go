@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -99,10 +100,35 @@ func Detect(project detect.Project, root string) []command {
 	if exists(filepath.Join(root, "Cargo.toml")) {
 		cmds = append(cmds, command{"build", "cargo build"}, command{"test", "cargo test"})
 	}
-	if exists(filepath.Join(root, "pytest.ini")) || exists(filepath.Join(root, "pyproject.toml")) {
+	if isPython(project) && hasPytest(project, root) {
 		cmds = append(cmds, command{"test", "python3 -m pytest -q"})
 	}
 	return cmds
+}
+
+// isPython reports whether the project is a Python project, by package manager
+// or detected source language. It gates pytest detection so a Go or JS repo —
+// whose test files also count toward the language-agnostic Counts.Test — never
+// spuriously fires pytest.
+func isPython(p detect.Project) bool {
+	switch p.PackageManager {
+	case "pip", "uv", "poetry":
+		return true
+	}
+	return slices.Contains(p.Stack, "py")
+}
+
+// hasPytest reports whether a Python project looks runnable under pytest: either
+// an explicit config file, or — the common bare layout — at least one test file
+// the scan already classified. Reusing Counts.Test avoids re-globbing and tracks
+// the same test-detection logic the rest of Humify uses.
+func hasPytest(p detect.Project, root string) bool {
+	if exists(filepath.Join(root, "pytest.ini")) ||
+		exists(filepath.Join(root, "pyproject.toml")) ||
+		exists(filepath.Join(root, "setup.cfg")) {
+		return true
+	}
+	return p.Counts.Test > 0
 }
 
 // nodeCommands picks validation scripts a package.json actually declares, so

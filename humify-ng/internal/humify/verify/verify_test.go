@@ -63,6 +63,42 @@ func TestRunNoCommandsIsSkippedNotFailed(t *testing.T) {
 	}
 }
 
+func TestDetectPytestFromBareTestsLayout(t *testing.T) {
+	// The most common Python layout: a tests/ dir with test_*.py plus a
+	// requirements.txt, but no pytest.ini or pyproject.toml. verify must still
+	// detect pytest by reusing the scan's test-file classification rather than
+	// requiring a config file.
+	root := t.TempDir()
+	writeFile(t, root, "requirements.txt", "requests\n")
+	writeFile(t, root, "app.py", "def main():\n    return 1\n")
+	writeFile(t, root, "tests/test_app.py", "def test_main():\n    assert True\n")
+
+	var testLine string
+	for _, c := range detectFor(t, root) {
+		if c.kind == "test" {
+			testLine = c.line
+		}
+	}
+	if testLine != "python3 -m pytest -q" {
+		t.Errorf("bare pytest layout should detect 'python3 -m pytest -q'; got %q", testLine)
+	}
+}
+
+func TestDetectGoTestsDoNotTriggerPytest(t *testing.T) {
+	// Counts.Test is language-agnostic, so the Python gate must keep a Go repo
+	// with _test.go files from spuriously firing pytest.
+	root := t.TempDir()
+	writeFile(t, root, "go.mod", "module x\n\ngo 1.26\n")
+	writeFile(t, root, "main.go", "package main\nfunc main() {}\n")
+	writeFile(t, root, "main_test.go", "package main\nimport \"testing\"\nfunc TestX(t *testing.T) {}\n")
+
+	for _, c := range detectFor(t, root) {
+		if c.line == "python3 -m pytest -q" {
+			t.Errorf("go repo must not detect pytest; got %+v", c)
+		}
+	}
+}
+
 func detectFor(t *testing.T, root string) []command {
 	t.Helper()
 	res, err := scan.Walk(root, nil)
