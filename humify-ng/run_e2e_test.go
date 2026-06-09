@@ -121,6 +121,38 @@ func TestUntangleRunE2E(t *testing.T) {
 			t.Fatalf("want stuck (not iteration_cap), got:\n%s", out)
 		}
 	})
+
+	// Regression: status used to ignore --root (it resolved from cwd only), so an
+	// orchestrator driving the pipeline with --root uniformly hit a false "no
+	// project" on the one read-only status call. With --root honored, status finds
+	// the bootstrapped project regardless of cwd.
+	t.Run("status honors --root", func(t *testing.T) {
+		root, _ := fixture(t)
+		code, out := runHumify(t, "untangle", "status", "--root", root, "--json")
+		if code != exitOK {
+			t.Fatalf("status --root should succeed, got %d:\n%s", code, out)
+		}
+		if strings.Contains(out, "no_humify_dir") {
+			t.Fatalf("status ignored --root (looked in cwd, not the project):\n%s", out)
+		}
+	})
+
+	// Regression: the driver advances disk state across stages but left no handoff
+	// breadcrumb, so heatmap's pre-run "humify audit" cursor survived and every
+	// completed run made the next resume cry stale_handoff on a healthy project.
+	t.Run("after run, resume agrees — no false stale_handoff", func(t *testing.T) {
+		root, _ := fixture(t)
+		if code, out := runHumify(t, "untangle", "run", "--root", root, "--agent-cmd", agent, "--json"); code != exitOK {
+			t.Fatalf("run failed (%d):\n%s", code, out)
+		}
+		code, out := runHumify(t, "untangle", "resume", "--root", root, "--json")
+		if code != exitOK {
+			t.Fatalf("resume after a clean run should be exit 0, got %d:\n%s", code, out)
+		}
+		if strings.Contains(out, "stale_handoff") {
+			t.Fatalf("run left a stale cursor — resume falsely reports drift:\n%s", out)
+		}
+	})
 }
 
 // buildFakeAgent compiles testdata/fakeagent into a binary that outlives the

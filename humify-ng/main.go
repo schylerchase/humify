@@ -238,10 +238,14 @@ func resolveRoot(opts options) string {
 }
 
 func untangleStatus(opts options) int {
-	root, found := layout.FindRoot(opts.path)
-	if !found {
+	// resolveRoot, like every other untangle subcommand, honors --root first and
+	// only then walks up from --path. (status used to call FindRoot(opts.path)
+	// directly, silently ignoring --root.) resolveRoot can fall back to a path that
+	// is not a project, so confirm .humify/ actually exists at the resolved root.
+	root := resolveRoot(opts)
+	if fi, err := os.Stat(layout.HumifyDir(root)); err != nil || !fi.IsDir() {
 		return fail(opts, "no_humify_dir", exitError,
-			"no .humify/ directory found from "+opts.path)
+			"no .humify/ directory found from "+root)
 	}
 	ids, err := layout.DiscoverAreas(root)
 	if err != nil {

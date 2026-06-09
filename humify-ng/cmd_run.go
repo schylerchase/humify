@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"humify-ng/internal/audit"
+	"humify-ng/internal/handoff"
 	"humify-ng/internal/layout"
 	"humify-ng/internal/output"
 	"humify-ng/internal/pipeline"
@@ -45,6 +46,12 @@ func untangleRun(opts options) int {
 	}
 	cfg := spawn.Config{AgentCmd: opts.agentCmd, Jobs: opts.jobs, Timeout: opts.timeout}
 
+	// The manual stage commands each leave a handoff cursor; the driver advances the
+	// same disk state across many stages but left none, so a pre-run cursor (e.g.
+	// heatmap's "humify audit") survived and made the next resume report a false
+	// stale_handoff. Refresh it on every exit so resume/status agree with disk.
+	defer recordRunCursor(root)
+
 	var steps []runStep
 	stuck := 0
 	maxIters := iterationCap(root, opts.maxReplans)
@@ -74,6 +81,26 @@ func untangleRun(opts options) int {
 	}
 	return fail(opts, "iteration_cap", exitError,
 		"driver hit its iteration cap without converging — likely a logic bug; inspect .humify/ and run `humify resume`")
+}
+
+// recordRunCursor refreshes the one-shot handoff cursor to match the disk-derived
+// next step at the moment the driver returns, so a follow-up `resume`/`status`
+// agrees instead of flagging the pre-run cursor the driver advanced past. When
+// nothing is actionable (pipeline done), it clears any prior cursor rather than
+// writing a blank one that would itself read as stale. nextActionable is the same
+// disk-derived decision resume prints, so the cursor and disk can never disagree.
+func recordRunCursor(root string) {
+	step := nextActionable(root)
+	if step.NextCommand == "" {
+		_, _, _ = handoff.Consume(root)
+		return
+	}
+	saveHandoff(root, handoff.Handoff{
+		Stage:       string(step.Stage),
+		Action:      "proceed",
+		NextCommand: step.NextCommand,
+		Note:        "advanced by untangle run",
+	})
 }
 
 // runStep is one driver iteration's record, for the trace the driver prints.
