@@ -1,7 +1,0 @@
-# build artifacts
-/humify.exe
-/humify
-
-# Humify state written by dogfooding `humify analyze .` at the module root.
-# Anchored so it never matches the tracked testdata/sample/.humify/ fixtures.
-/.humify/

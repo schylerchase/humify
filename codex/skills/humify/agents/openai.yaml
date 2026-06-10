@@ -1,7 +1,0 @@
-interface:
-  display_name: "Humify"
-  short_description: "Audit messy repos and plan safe refactors"
-  default_prompt: "Use $humify to run a read-only audit and safe refactor plan."
-
-policy:
-  allow_implicit_invocation: true

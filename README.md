@@ -1,240 +1,104 @@
 # Humify
 
-Humify is a readability-first framework for reviewing, unwinding, and refactoring messy codebases. It helps an AI coding agent and a human reviewer find the code that is hard to trust, change, or test, then fix it without losing behavior.
+A safe, deterministic CLI that **reviews a codebase for AI-generated / AI-degraded code smells, scores its human maintainability, and produces a prioritized refactor plan** — analyzing and planning before it ever touches your source.
 
-The goal is not prettier code. The goal is to restore human confidence in a codebase: code that is boring to navigate, easy to name, and hard to break by accident.
-
-Humify runs as a skill for OpenAI Codex or Anthropic Claude. You point your agent at this repo and say "Run Humify on this repo." It starts read-only and edits code only after you open the refactor gate.
-
-## What Humify does
-
-- Maps a repository before judging it, so you know what was reviewed and what was skipped.
-- Separates ordinary mess from high-risk areas, so cleanup effort goes where it matters.
-- Flags machine-shaped maintainability signals with file and line evidence. It does not claim code was AI-generated.
-- Scores readability and refactor risk, then turns low scores into safe, tests-first refactor slices.
-- Reviews large codebases through maps and heatmaps instead of one impossible pass.
-- Uses a stellar reference codebase as positive guidance, not just a list of problems.
-
-## What you get
-
-Humify produces a small set of evidence-backed artifacts. Each one starts from a template in `shared/templates/`.
-
-- `HUMIFY-MAP.md`: the file and ownership map. Languages, entry points, tests, and the generated or vendored paths that were excluded.
-- `HUMIFY-HEATMAP.md`: scored areas with a confidence column and honest coverage limits.
-- `HUMIFY-AUDIT.md`: findings with file and line evidence, a classification summary, cleared false positives, and a Refactor Readiness Verdict.
-- `HUMIFY-PLAN.md`: tests-first refactor slices, produced when a score is low or risk is high.
-- `HUMIFY-PATCHLOG.md`: completed slices, the tests that protected them, and the residual risk.
+> Humify analyzes by default and changes source only through `apply`, which is conservative, reversible, and validated.
 
 ## Install
 
-Humify installs as a plugin from this repo's marketplace. Each adapter is self-contained, so install whichever host you use, or both. They do not depend on each other or on the rest of the repo.
-
-### Claude Code
-
-```bash
-claude plugin marketplace add schylerchase/humify
-claude plugin install humify@humify
+```sh
+go install humify@latest
 ```
 
-Or from inside Claude Code: `/plugin marketplace add schylerchase/humify`, then `/plugin install humify@humify`.
+Or build from source:
 
-### Codex
-
-```bash
-codex plugin marketplace add schylerchase/humify --ref main --sparse .agents/plugins --sparse codex
-codex plugin add humify@humify
+```sh
+git clone https://github.com/schylerchase/humify
+cd humify
+go build -o humify .
 ```
 
-Or from inside Codex: open `/plugins`, add `schylerchase/humify`, and install Humify.
+## Commands
 
-## Updating
-
-Plugins do not auto-update. The Claude adapter checks this repo about once a day and prints a notice when a newer version is available. Codex does not, so check it yourself.
-
-To update:
-
-```bash
-# Claude Code
-claude plugin marketplace update humify
-claude plugin update humify@humify
-
-# Codex
-codex plugin marketplace upgrade humify
+```sh
+humify analyze [PATH]                              # review the repo → .humify/analysis.json
+humify plan    [PATH]                              # rank fixes into HMF-### items → .humify/plan.json
+humify verify  [PATH]                              # run detected test/build/lint/typecheck
+humify status  [PATH]                              # print current analysis/plan/validation state
+humify doctor  [PATH]                              # check wiring, git, stack, and repo readiness
+humify apply   --target HMF-### [--dry-run|--yes] [PATH]
 ```
 
-Restart the host after updating so the refreshed docs load.
+`PATH` defaults to the current directory. Add `--json` for machine output. Add `--markdown` (analyze/plan) to also write `HUMIFY_REPORT.md` / `HUMIFY_PLAN.md`.
 
-## Use it
+## Recommended workflow
 
-Once the skill is loaded, the prompt is:
-
-```text
-Run Humify on this repo.
+```sh
+humify analyze
+humify plan
+humify apply --target HMF-001 --dry-run
+humify apply --target HMF-001 --yes
+humify verify
 ```
 
-To go straight to planning:
+## What `analyze` looks for
 
-```text
-Use Humify to create a refactor plan.
+- **Structure:** giant files, long functions, deep nesting (thresholds tunable via `humify.config.json`: `maxFileLines`, `maxFunctionLines`, `maxNestingDepth`).
+- **AI-slop signals:** vague names (`data`, `manager`, `helper`), generic file names, comments that restate the code, leftover `TODO`/`FIXME` markers, and throwaway/empty files.
+- **Correctness risk:** swallowed errors (empty `catch`/`if err != nil {}`, `except: pass`) and broad catches (`except Exception`).
+
+Scores five health categories (0–100): **readability, maintainability, correctness risk, testability, efficiency**.
+
+## `apply` safety model
+
+`apply` is the only command that changes source, and it is deliberately timid:
+
+- **Default dry run.** Acts only with `--target HMF-### --yes`.
+- **Three automation tiers:**
+  - `safe` — apply executes automatically (quarantine stale files, no source edits).
+  - `assisted` — humify can help, but a human must review/confirm each edit.
+  - `manual` — humify refuses to touch it. Broad exception narrowing, splitting giant files, breaking up long functions all require understanding intent. You do it by hand, then run `humify verify`.
+- **Quarantine, not delete.** Safe items are moved (never deleted) into `.humify/delete-me/<plan-id>/` with a `manifest.json`. Restore by moving them back.
+- **Validated.** Records validation before and after, and rolls back if a passing check regresses.
+
+## Generated files
+
+```
+.humify/
+  analysis.json          findings + health scores
+  plan.json              ranked HMF-### refactor items
+  validation.json        test/build/lint results
+  delete-me/<id>/        quarantined files (safe apply only)
+  HUMIFY_REPORT.md       optional markdown summary (--markdown)
+  HUMIFY_PLAN.md         optional markdown plan (--markdown)
 ```
 
-Humify captures repo state first: git root, branch, and any dirty, staged, untracked, or ignored files. It then builds the map and heatmap, audits the hotspots with evidence, and runs a steelman pass over its own findings. It moves into a no-commit refactor slice only after you opt in and the refactor gate is open.
+## Large codebase workflow
 
-Warning: if the repo is dirty, Humify stays in audit and plan mode. It will not stash, revert, clean, or commit your work to open the gate. Give it a clean worktree, or tell it to accept the current tree as the baseline.
+For codebases too large to analyze in one pass, use the untangle pipeline:
 
-## How it works
-
-For a normal repo, the audit runs as an ordered set of passes. It excludes generated and vendored code, checks local conventions and domain language, reviews function design and canonical contracts, looks for machine-shaped signals, separates those signals from real refactor risk, selects findings that carry evidence, steelmans them, and checks public readiness.
-
-For a repo too large to read in one pass, Humify uses an eight-stage massive-codebase workflow:
-
-1. Target state and dirty-repo protocol.
-2. Repository map.
-3. Exclusion map for generated, vendored, and build output.
-4. Stratified sampling.
-5. Heatmap scoring across nine categories on a 0 to 3 scale.
-6. Deep dives on the hotspots.
-7. Refactor plan when scores cross the low-score trigger.
-8. Coverage steelman before any whole-repo conclusion.
-
-### Classifications
-
-Every reviewed file gets exactly one label. The precedence order, highest first:
-
-1. Excluded generated file. Only with generation evidence.
-2. High-risk refactor candidate.
-3. Machine-shaped readability risk.
-4. Needs targeted cleanup.
-5. Clean.
-
-Machine-shaped confidence (None, Low, Medium, High, or Not applicable) is judged separately from refactor risk. A file can be messy and low-risk, or clean-looking and high-risk. Humify does not collapse the two.
-
-### Risk escalation
-
-A file becomes a High-risk refactor candidate only when a refactor could silently change behavior that is irreversible or safety-critical, and that behavior is not protected by tests. That covers money, permissions, deletion, medical or other high-trust data, infrastructure state, data migrations, retry and concurrency logic, and contract drift across surfaces.
-
-Plain reads, imports, and CRUD that simply lack tests are Needs targeted cleanup, not High-risk. A stable compatibility wrapper or an ugly-but-working file with no demonstrated defect is Clean. Age and ugliness are not findings.
-
-## Tests-first planning
-
-A low audit score means slow down and slice deliberately. It does not mean rewrite.
-
-Every plan starts with a characterization harness. The first unit captures current behavior with tests or golden output. Code movement comes after. Each later unit names the exact files, the findings it addresses, its tests, its verification, and how to roll it back on its own.
-
-A plan is not executable until it passes seven gates: behavior captured, scope mapped to findings, risky behavior tested before movement, each unit independently revertible, public API changes called out, unknown areas listed, and generated code excluded or justified.
-
-## Safety model
-
-- Read-only audit is the default.
-- Refactor mode requires explicit opt-in.
-- A dirty repo blocks source edits until you accept the baseline or use a clean worktree.
-- Generated, vendored, and build artifacts are excluded before scoring.
-- Risky behavior needs characterization tests or golden-output capture before any change.
-- Humify never commits unless you ask.
-
-## Privacy model
-
-Humify does not publish private run details. Repo names, absolute paths, remotes, customer identifiers, cloud accounts, and exact private findings stay in local run folders.
-
-- `.humify-runs/`, `private/`, `actual/`, and `actual-plans/` are git-ignored.
-- `.claude/` is ignored in-repo, so the privacy guarantee does not depend on a contributor's global ignore file.
-- Public docs use synthetic or sanitized examples.
-
-Turn useful lessons from private repos into synthetic case studies in `shared/EXAMPLES.md` instead of committing raw findings.
-
-## When not to refactor
-
-Do not run a refactor slice when:
-
-- the repo is dirty and you have not accepted the baseline,
-- tests or golden-output checks do not protect the risky behavior,
-- generated files could be regenerated from another source,
-- the slice mixes unrelated workflows,
-- the finding has no file or line evidence,
-- the only evidence is "this looks messy."
-
-## Calibration and evaluators
-
-Humify ships with a calibration pack so you can measure whether the framework scores the way it should. `shared/fixtures/` holds the input code. `shared/expected/` holds the gold audit outputs. `shared/expected-plans/` holds the gold plans.
-
-Two evaluators score outputs against those baselines and share one rubric, stored in `shared/tools/humify-fixtures.json` and `humify-plan-fixtures.json`.
-
-Audit scoring is out of 51 (17 fixtures, 3 points each). Plan scoring is out of 33 (11 plans, 3 points each). The readiness threshold is 86 percent: 44 of 51 for audits, 29 of 33 for plans.
-
-Audit readiness bands:
-
-- 86 to 100 percent: ready to use on a real repo.
-- 67 to 85 percent: usable with human review.
-- 40 to 66 percent: needs framework tuning.
-- 0 to 39 percent: not reliable yet.
-
-Plan bands use the same percentages with plan-specific labels, starting at "plan calibration ready."
-
-Run the Python evaluators. They use Python 3 and the standard library only:
-
-```bash
-python3 shared/tools/humify_evaluate.py --actual-dir <your-audit-outputs> --expected-dir shared/expected
-python3 shared/tools/humify_evaluate_plans.py --actual-plan-dir <your-plan-outputs> --expected-plan-dir shared/expected-plans
+```sh
+humify untangle heatmap     --target=DIR
+humify untangle audit       [--runner=dispatch|spawn] [--agent-cmd=CMD]
+humify untangle consolidate
+humify untangle plan
+humify untangle execute
+humify untangle run         --agent-cmd=CMD [--execute]
 ```
 
-Add `--fail-below-threshold` to exit non-zero when the score falls under the bar.
+`run` is the autonomous driver: it walks each area through audit → consolidate → plan and optionally through execute, spawning `--agent-cmd` at each agent stage. Pass `--execute` to allow source-modifying stages.
 
-PowerShell twins exist for hosts that prefer them:
+## Safety guarantees
 
-```powershell
-pwsh -NoProfile -File shared/tools/humify-evaluate.ps1 -ActualDir <your-audit-outputs> -ExpectedDir shared/expected
-```
+- `analyze`, `plan`, `verify`, `status`, and `doctor` never modify target source.
+- Humify writes only under `.humify/`. It never deletes your files.
+- `apply` quarantines (never deletes) and is reversible.
+- It warns before `apply` if the repo is dirty.
 
-One caution about self-tests. Scoring a directory against itself, where actual equals expected, is forced to the maximum and only proves the evaluator is wired correctly. The report labels it that way. The honest metric is a blind run: generate the outputs without reading the expected files, then score them. The self-test goes further and feeds deliberately wrong output to confirm the evaluator can actually fail:
+## Exit codes
 
-```bash
-python3 shared/tools/humify_selftest.py
-```
-
-A passing self-test reports that identity wiring holds and that the evaluator fails on bad input.
-
-## Repository layout
-
-```text
-shared/   dev source of truth and calibration pack: docs, templates, fixtures, expected baselines, evaluators. Not shipped in an installed plugin.
-codex/    Codex adapter, a self-contained plugin: .codex-plugin/plugin.json, skills/humify/SKILL.md, skills/humify/reference/ (bundled docs), skills/humify/agents/openai.yaml
-claude/   Claude adapter, a self-contained plugin: .claude-plugin/plugin.json, skills/humify/SKILL.md, skills/humify/reference/ (bundled docs), hooks/ + scripts/ (update notifier)
-actual/   stub directory for your audit outputs before scoring (contents git-ignored)
-```
-
-Each adapter's `reference/` is generated from `shared/` by `shared/tools/sync-adapters.sh`. To change the methodology, edit the docs in `shared/`, run the sync script, bump the plugin version, and commit. Installed plugins carry their own copy and never read `shared/`.
-
-Key documents in `shared/`:
-
-```text
-HUMIFY.md                     the framework standard
-HUMIFY-VISION.md              product vision and the main rules
-HUMIFY-OPERATOR.md            the operator workflow
-HUMIFY-AI-INSTRUCTIONS.md     the full model judgment rubric
-MASSIVE-CODEBASE-WORKFLOW.md  the large-repo protocol
-REFACTOR-PLAN-PROTOCOL.md     the tests-first planning protocol
-STEELMAN-PASS.md              the adversarial check on findings and plans
-MODEL-CONTEXT-PACKET.md       the order to assemble model context
-HUMIFY-TESTING.md             the calibration workflow
-EXAMPLES.md                   concrete review situations
-STELLAR-CODEBASES.md          what good code looks like
-```
-
-Prompt entry points:
-
-```text
-shared/prompts/humify-audit.md             normal codebase audit
-shared/prompts/humify-plan.md              refactor plan from an audit
-shared/prompts/humify-calibration.md       fixture calibration
-shared/prompts/humify-massive-codebase.md  massive-codebase workflow
-```
-
-## Example outputs
-
-- Example audit: `shared/expected/registry-drift-audit.md`
-- Example refactor plan: `shared/expected-plans/registry-drift-plan.md`
-- Positive reference codebase: `shared/examples/stellar-codebase/`
-
-## Steelman every audit
-
-Before you trust an audit or a plan, run it through `shared/STEELMAN-PASS.md`. The pass checks evidence strength, false-positive risk, coverage gaps, safety guardrails, and whether the first refactor slice is small enough to execute. If a finding cannot survive that check, it does not ship.
+| Code | Meaning |
+|------|---------|
+| 0 | ok |
+| 1 | error / not a humify project |
+| 2 | verify failed or apply rolled back |
