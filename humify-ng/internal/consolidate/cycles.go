@@ -14,7 +14,11 @@ import (
 func detectCycles(items []srcFinding) []Conflict {
 	adj := map[string][]string{}
 	for _, it := range items {
-		adj[it.src] = append(adj[it.src], it.f.Refs...)
+		for _, ref := range it.f.Refs {
+			if ref != it.src { // skip self-references — not a real cross-area cycle
+				adj[it.src] = append(adj[it.src], ref)
+			}
+		}
 	}
 	var out []Conflict
 	for _, c := range findCycles(adj) {
