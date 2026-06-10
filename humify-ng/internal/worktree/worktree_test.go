@@ -24,6 +24,8 @@ type mockGit struct {
 	removeCalls  []string
 	delBranches  []string
 	reverted     []string
+	aborted      int
+	inMerge      bool
 }
 
 func newMock() *mockGit {
@@ -67,6 +69,8 @@ func (m *mockGit) Merge(branch, msg string) (string, error) {
 	m.shaSeq++
 	return fmt.Sprintf("sha%d", m.shaSeq), nil
 }
+func (m *mockGit) AbortMerge() error    { m.aborted++; return nil }
+func (m *mockGit) InMerge() bool        { return m.inMerge }
 func (m *mockGit) RemoveWorktree(path string) error {
 	m.removeCalls = append(m.removeCalls, path)
 	return nil
@@ -144,6 +148,39 @@ func TestMergeWaveGates(t *testing.T) {
 				t.Fatalf("%s: nothing should merge when the only slice blocks", c.name)
 			}
 		})
+	}
+}
+
+func TestMergeWaveConflictAbortsAndBlocks(t *testing.T) {
+	m := newMock()
+	m.mergeErr[BranchFor("01-a")] = true
+	r := MergeWave(m, []Entry{ent("01-a"), ent("02-b")}, "base0")
+	if r.OK() || r.Blocked == nil {
+		t.Fatal("want blocked, got ok")
+	}
+	if r.Blocked.Gate != "merge" {
+		t.Fatalf("gate = %q, want merge", r.Blocked.Gate)
+	}
+	if m.aborted != 1 {
+		t.Fatalf("AbortMerge must be called once after conflict; got %d", m.aborted)
+	}
+}
+
+func TestMergeWaveBlocksOnStaleMergeHead(t *testing.T) {
+	m := newMock()
+	m.inMerge = true
+	r := MergeWave(m, []Entry{ent("01-a"), ent("02-b")}, "base0")
+	if r.OK() || r.Blocked == nil {
+		t.Fatal("want blocked when MERGE_HEAD present")
+	}
+	if r.Blocked.Gate != "mid-merge" {
+		t.Fatalf("gate = %q, want mid-merge", r.Blocked.Gate)
+	}
+	if len(r.Pending) != 2 {
+		t.Fatalf("all entries should be pending; got %v", r.Pending)
+	}
+	if len(m.mergeCalls) != 0 {
+		t.Fatal("no merges should be attempted when already mid-merge")
 	}
 }
 

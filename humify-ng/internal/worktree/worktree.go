@@ -43,6 +43,12 @@ type Git interface {
 	DeletedFiles(base, branch string) ([]string, error)
 	IsClean(worktreePath string) (bool, error)
 	Merge(branch, message string) (sha string, err error)
+	// AbortMerge runs `git merge --abort` to clean up a failed merge that left
+	// MERGE_HEAD behind. Must be called after any Merge that returns an error,
+	// before the next operation, or the repo stays in a broken mid-merge state.
+	AbortMerge() error
+	// InMerge returns true when the repo has a MERGE_HEAD (mid-merge state).
+	InMerge() bool
 	RemoveWorktree(path string) error
 	DeleteBranch(branch string) error
 	// RevertMerge reverts a --no-ff merge commit relative to its first parent
@@ -99,6 +105,14 @@ func Fork(g Git, sliceID, worktreePath string) (Entry, error) {
 // re-run.
 func MergeWave(g Git, entries []Entry, baseRef string) WaveResult {
 	var res WaveResult
+	if g.InMerge() {
+		res.Blocked = &Blocked{SliceID: "", Gate: "mid-merge",
+			Reason: "repository is in a mid-merge state (MERGE_HEAD exists) — resolve or run `git merge --abort`, then retry"}
+		for _, e := range entries {
+			res.Pending = append(res.Pending, e.SliceID)
+		}
+		return res
+	}
 	for i, e := range entries {
 		sha, gate, reason, ok := mergeOne(g, e, baseRef)
 		if !ok {
@@ -150,6 +164,7 @@ func mergeOne(g Git, e Entry, baseRef string) (sha, gate, reason string, ok bool
 	}
 	sha, err = g.Merge(e.Branch, "humify: merge slice "+e.SliceID)
 	if err != nil {
+		_ = g.AbortMerge() // clean up MERGE_HEAD so the repo is usable after the block
 		return "", "merge", "merge --no-ff failed (conflict?): " + err.Error(), false
 	}
 	return sha, "", "", true

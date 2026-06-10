@@ -82,6 +82,16 @@ func (g gitCLI) Merge(branch, message string) (string, error) {
 	return run(g.repoDir, "rev-parse", "HEAD")
 }
 
+func (g gitCLI) AbortMerge() error {
+	_, err := run(g.repoDir, "merge", "--abort")
+	return err
+}
+
+func (g gitCLI) InMerge() bool {
+	_, err := run(g.repoDir, "rev-parse", "--verify", "MERGE_HEAD")
+	return err == nil
+}
+
 func (g gitCLI) RemoveWorktree(path string) error {
 	_, err := run(g.repoDir, "worktree", "remove", path)
 	return err
