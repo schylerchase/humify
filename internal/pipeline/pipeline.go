@@ -11,13 +11,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"humify/internal/audit"
-	"humify/internal/consolidate"
-	"humify/internal/exec"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/plan"
-	"humify/internal/state"
+	"github.com/schylerryan/humify/internal/audit"
+	"github.com/schylerryan/humify/internal/consolidate"
+	"github.com/schylerryan/humify/internal/exec"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/plan"
+	"github.com/schylerryan/humify/internal/state"
 )
 
 // Stage is one lifecycle stage (or the terminal "done").

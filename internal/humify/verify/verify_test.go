@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"humify/internal/humify/detect"
-	"humify/internal/humify/scan"
+	"github.com/schylerryan/humify/internal/humify/detect"
+	"github.com/schylerryan/humify/internal/humify/scan"
 )
 
 func TestDetectGoCommands(t *testing.T) {

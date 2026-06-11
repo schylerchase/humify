@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"humify/internal/humify/analyze"
-	"humify/internal/humify/state"
+	"github.com/schylerryan/humify/internal/humify/analyze"
+	"github.com/schylerryan/humify/internal/humify/state"
 )
 
 // Item is one ranked refactor pass.

@@ -5,15 +5,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"humify/internal/area"
-	"humify/internal/graph"
-	"humify/internal/handoff"
-	"humify/internal/heatmap"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/manifest"
-	"humify/internal/output"
-	"humify/internal/scan"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/graph"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/heatmap"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/manifest"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/scan"
 )
 
 // cmdHeatmap scans a target codebase and bootstraps a .humify/ project:

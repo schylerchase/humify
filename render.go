@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"humify/internal/humify/analyze"
-	"humify/internal/humify/apply"
-	hplan "humify/internal/humify/plan"
-	hstate "humify/internal/humify/state"
-	"humify/internal/humify/verify"
+	"github.com/schylerryan/humify/internal/humify/analyze"
+	"github.com/schylerryan/humify/internal/humify/apply"
+	hplan "github.com/schylerryan/humify/internal/humify/plan"
+	hstate "github.com/schylerryan/humify/internal/humify/state"
+	"github.com/schylerryan/humify/internal/humify/verify"
 )
 
 const topFindings = 8

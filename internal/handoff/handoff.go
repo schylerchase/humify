@@ -15,7 +15,7 @@ import (
 	"errors"
 	"os"
 
-	"humify/internal/layout"
+	"github.com/schylerryan/humify/internal/layout"
 )
 
 // Handoff records what a command just did and what comes next. It is structural,

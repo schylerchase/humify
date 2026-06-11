@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"humify/internal/area"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/manifest"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/manifest"
 )
 
 // --- fixture builders (advance a .humify/ project through the lifecycle) ---

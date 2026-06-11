@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"humify/internal/humify/ignore"
+	"github.com/schylerryan/humify/internal/humify/ignore"
 )
 
 // maxReadBytes caps how much of a file scan reads to count lines and sniff for

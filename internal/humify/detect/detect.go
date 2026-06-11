@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"humify/internal/humify/scan"
+	"github.com/schylerryan/humify/internal/humify/scan"
 )
 
 // FileRef names a file with its line count, for "largest files" lists.

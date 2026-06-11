@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"humify/internal/handoff"
-	"humify/internal/layout"
-	"humify/internal/output"
-	"humify/internal/state"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/state"
 )
 
 // Version is set at build time via -ldflags "-X main.Version=vX.Y.Z".

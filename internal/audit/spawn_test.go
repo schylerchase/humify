@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"humify/internal/layout"
+	"github.com/schylerryan/humify/internal/layout"
 )
 
 // testPlan builds a Plan rooted in a fresh temp dir with one pending Job per id.

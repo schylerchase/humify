@@ -10,7 +10,7 @@ import (
 	"io"
 	"text/tabwriter"
 
-	"humify/internal/state"
+	"github.com/schylerryan/humify/internal/state"
 )
 
 // Result is the structured envelope emitted under --json.

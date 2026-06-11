@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"humify/internal/layout"
+	"github.com/schylerryan/humify/internal/layout"
 )
 
 // DefaultMaxReplans bounds re-planning per area (the architecture's "max 3").

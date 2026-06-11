@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"humify/internal/plancheck"
+	"github.com/schylerryan/humify/internal/plancheck"
 )
 
 // A finding's Detail flows from an auditor reading untrusted target code. A

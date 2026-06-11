@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"humify/internal/audit"
-	"humify/internal/pipeline"
+	"github.com/schylerryan/humify/internal/audit"
+	"github.com/schylerryan/humify/internal/pipeline"
 )
 
 // withSilencedStdout runs fn with os.Stdout redirected to the null device, so a

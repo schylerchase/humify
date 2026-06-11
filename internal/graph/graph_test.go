@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"humify/internal/area"
-	"humify/internal/scan"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/scan"
 )
 
 func TestComputeAcyclicChain(t *testing.T) {

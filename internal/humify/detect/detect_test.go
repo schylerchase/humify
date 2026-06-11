@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"humify/internal/humify/scan"
+	"github.com/schylerryan/humify/internal/humify/scan"
 )
 
 func TestDetectNodeProject(t *testing.T) {

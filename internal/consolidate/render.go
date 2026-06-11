@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"humify/internal/textutil"
+	"github.com/schylerryan/humify/internal/textutil"
 )
 
 // RenderAudit produces AUDIT.md. Only COVERED areas are listed (so `status`

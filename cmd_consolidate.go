@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"humify/internal/consolidate"
-	"humify/internal/handoff"
-	"humify/internal/layout"
-	"humify/internal/output"
+	"github.com/schylerryan/humify/internal/consolidate"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
 )
 
 // cmdConsolidate runs the fan-in engine: gather fragments -> dedup -> detect

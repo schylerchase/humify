@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"humify/internal/area"
-	"humify/internal/scan"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/scan"
 )
 
 // Edge is a dependency edge: From depends on To.

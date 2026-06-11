@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"humify/internal/humify/analyze"
-	"humify/internal/humify/plan"
-	"humify/internal/humify/verify"
+	"github.com/schylerryan/humify/internal/humify/analyze"
+	"github.com/schylerryan/humify/internal/humify/plan"
+	"github.com/schylerryan/humify/internal/humify/verify"
 )
 
 // buildRepo creates a target with one stale file and one JS file containing a

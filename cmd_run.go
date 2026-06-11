@@ -6,13 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"humify/internal/audit"
-	"humify/internal/handoff"
-	"humify/internal/layout"
-	"humify/internal/output"
-	"humify/internal/pipeline"
-	"humify/internal/plan"
-	"humify/internal/spawn"
+	"github.com/schylerryan/humify/internal/audit"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/pipeline"
+	"github.com/schylerryan/humify/internal/plan"
+	"github.com/schylerryan/humify/internal/spawn"
 )
 
 // untangleRun is the autonomous driver: it walks the same next-step decision

@@ -12,10 +12,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"humify/internal/area"
-	"humify/internal/graph"
-	"humify/internal/heatmap"
-	"humify/internal/layout"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/graph"
+	"github.com/schylerryan/humify/internal/heatmap"
+	"github.com/schylerryan/humify/internal/layout"
 )
 
 // ErrNotExist is returned by Load when no intel has been written yet.

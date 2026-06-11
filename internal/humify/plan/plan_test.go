@@ -3,7 +3,7 @@ package plan
 import (
 	"testing"
 
-	"humify/internal/humify/analyze"
+	"github.com/schylerryan/humify/internal/humify/analyze"
 )
 
 func TestBuildRanksQuarantineFirst(t *testing.T) {

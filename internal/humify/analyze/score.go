@@ -1,6 +1,6 @@
 package analyze
 
-import "humify/internal/humify/detect"
+import "github.com/schylerryan/humify/internal/humify/detect"
 
 // Penalty weights per severity. Scores are "health" out of 100: a clean repo
 // stays near 100, and each finding subtracts from its category.

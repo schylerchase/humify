@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	"humify/internal/handoff"
-	"humify/internal/output"
-	"humify/internal/pipeline"
-	"humify/internal/plan"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/pipeline"
+	"github.com/schylerryan/humify/internal/plan"
 )
 
 // cmdResume names the next step in the pipeline — deterministically and advisory.

@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"humify/internal/humify/plan"
-	"humify/internal/humify/state"
-	"humify/internal/humify/verify"
-	"humify/internal/spawn"
+	"github.com/schylerryan/humify/internal/humify/plan"
+	"github.com/schylerryan/humify/internal/humify/state"
+	"github.com/schylerryan/humify/internal/humify/verify"
+	"github.com/schylerryan/humify/internal/spawn"
 )
 
 // FileMove records one quarantined file for the manifest.

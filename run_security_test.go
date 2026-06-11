@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"humify/internal/area"
-	"humify/internal/plan"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/plan"
 )
 
 // TestDispatchPlanRejectsEscapingID locks the CRITICAL fix at its actual call site

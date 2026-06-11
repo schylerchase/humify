@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"humify/internal/layout"
+	"github.com/schylerryan/humify/internal/layout"
 )
 
 // Entry names one expected fragment.

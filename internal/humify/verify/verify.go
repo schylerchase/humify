@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"humify/internal/humify/detect"
-	"humify/internal/humify/scan"
-	"humify/internal/humify/state"
+	"github.com/schylerryan/humify/internal/humify/detect"
+	"github.com/schylerryan/humify/internal/humify/scan"
+	"github.com/schylerryan/humify/internal/humify/state"
 )
 
 // DefaultTimeout bounds a single validation command so a hung test run cannot

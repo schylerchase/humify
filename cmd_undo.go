@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
-	hexec "humify/internal/exec"
-	"humify/internal/layout"
-	"humify/internal/output"
-	"humify/internal/worktree"
+	hexec "github.com/schylerryan/humify/internal/exec"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/worktree"
 )
 
 // cmdUndo rolls back execute's merges by reverting each recorded merge commit,

@@ -18,10 +18,10 @@ import (
 	"path/filepath"
 	"sort"
 
-	"humify/internal/fragment"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/manifest"
+	"github.com/schylerryan/humify/internal/fragment"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/manifest"
 )
 
 // ErrNoManifest is the fail-closed gate for a project that was never bootstrapped.

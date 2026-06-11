@@ -8,12 +8,12 @@ import (
 	"runtime"
 	"strings"
 
-	hexec "humify/internal/exec"
-	"humify/internal/handoff"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/output"
-	"humify/internal/worktree"
+	hexec "github.com/schylerryan/humify/internal/exec"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/worktree"
 )
 
 // cmdExecute advances execution one wave at a time. A wave's planned-but-unbuilt

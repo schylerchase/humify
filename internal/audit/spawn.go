@@ -3,7 +3,7 @@ package audit
 import (
 	"time"
 
-	"humify/internal/spawn"
+	"github.com/schylerryan/humify/internal/spawn"
 )
 
 // SpawnRunner writes the auditor prompts and then runs an operator-supplied agent

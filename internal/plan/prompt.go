@@ -5,8 +5,8 @@ import (
 	"path"
 	"strings"
 
-	"humify/internal/plancheck"
-	"humify/internal/textutil"
+	"github.com/schylerryan/humify/internal/plancheck"
+	"github.com/schylerryan/humify/internal/textutil"
 )
 
 // Finding is one consolidated audit hazard the planner must address. It is a

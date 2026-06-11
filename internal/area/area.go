@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"humify/internal/scan"
+	"github.com/schylerryan/humify/internal/scan"
 )
 
 // Area is one decomposed unit of the target codebase.

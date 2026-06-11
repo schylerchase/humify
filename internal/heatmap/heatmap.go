@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"humify/internal/area"
-	"humify/internal/graph"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/graph"
 )
 
 // Score is one area's risk breakdown.

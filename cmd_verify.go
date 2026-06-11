@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"humify/internal/output"
-	"humify/internal/pipeline"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/pipeline"
 )
 
 // cmdVerify re-runs a stage's deterministic gate read-only, without doing the

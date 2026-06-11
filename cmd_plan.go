@@ -7,15 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"humify/internal/area"
-	"humify/internal/consolidate"
-	"humify/internal/handoff"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/output"
-	"humify/internal/plan"
-	"humify/internal/plancheck"
-	"humify/internal/spawn"
+	"github.com/schylerryan/humify/internal/area"
+	"github.com/schylerryan/humify/internal/consolidate"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
+	"github.com/schylerryan/humify/internal/plan"
+	"github.com/schylerryan/humify/internal/plancheck"
+	"github.com/schylerryan/humify/internal/spawn"
 )
 
 // errAuditIncomplete marks a plan round refused because the audit/consolidate

@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strings"
 
-	"humify/internal/fragment"
-	"humify/internal/layout"
-	"humify/internal/manifest"
+	"github.com/schylerryan/humify/internal/fragment"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/manifest"
 )
 
 // Sentinel errors for the fail-closed manifest gate.

@@ -14,8 +14,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"humify/internal/layout"
-	"humify/internal/worktree"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/worktree"
 )
 
 // manifestPath is the fan-out source of truth: the worktree entries forked for

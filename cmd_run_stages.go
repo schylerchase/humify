@@ -6,16 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"humify/internal/audit"
-	"humify/internal/consolidate"
-	hexec "humify/internal/exec"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/pipeline"
-	"humify/internal/plan"
-	"humify/internal/plancheck"
-	"humify/internal/spawn"
-	"humify/internal/worktree"
+	"github.com/schylerryan/humify/internal/audit"
+	"github.com/schylerryan/humify/internal/consolidate"
+	hexec "github.com/schylerryan/humify/internal/exec"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/pipeline"
+	"github.com/schylerryan/humify/internal/plan"
+	"github.com/schylerryan/humify/internal/plancheck"
+	"github.com/schylerryan/humify/internal/spawn"
+	"github.com/schylerryan/humify/internal/worktree"
 )
 
 // advanceStage runs exactly one stage and returns its record. It dispatches on

@@ -3,8 +3,8 @@ package plan
 import (
 	"os"
 
-	"humify/internal/layout"
-	"humify/internal/plancheck"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/plancheck"
 )
 
 // Observe derives each target area's plan state from disk: PLAN.md presence, a

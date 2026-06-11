@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"humify/internal/manifest"
+	"github.com/schylerryan/humify/internal/manifest"
 )
 
 // project writes a manifest expecting `expected` area ids and drops the given

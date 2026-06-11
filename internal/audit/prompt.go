@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	"humify/internal/textutil"
+	"github.com/schylerryan/humify/internal/textutil"
 )
 
 // RenderPrompt builds the auditor prompt for one area. The auditor is a

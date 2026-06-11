@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"humify/internal/worktree"
+	"github.com/schylerryan/humify/internal/worktree"
 )
 
 // ExecutorJob is one slice's execution assignment, all paths relative to the

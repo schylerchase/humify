@@ -12,13 +12,13 @@ import (
 	"path/filepath"
 	"time"
 
-	"humify/internal/humify/analyze"
-	"humify/internal/humify/apply"
-	"humify/internal/humify/detect"
-	hplan "humify/internal/humify/plan"
-	"humify/internal/humify/scan"
-	hstate "humify/internal/humify/state"
-	"humify/internal/humify/verify"
+	"github.com/schylerryan/humify/internal/humify/analyze"
+	"github.com/schylerryan/humify/internal/humify/apply"
+	"github.com/schylerryan/humify/internal/humify/detect"
+	hplan "github.com/schylerryan/humify/internal/humify/plan"
+	"github.com/schylerryan/humify/internal/humify/scan"
+	hstate "github.com/schylerryan/humify/internal/humify/state"
+	"github.com/schylerryan/humify/internal/humify/verify"
 )
 
 // cmdAnalyze reviews the target read-only and writes .humify/analysis.json.

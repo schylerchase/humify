@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"humify/internal/layout"
+	"github.com/schylerryan/humify/internal/layout"
 )
 
 // Outcome reports what a Runner did with a Plan. In dispatch mode it lists the

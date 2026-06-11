@@ -6,10 +6,10 @@ import (
 	"sort"
 	"strings"
 
-	hexec "humify/internal/exec"
-	"humify/internal/handoff"
-	"humify/internal/layout"
-	"humify/internal/output"
+	hexec "github.com/schylerryan/humify/internal/exec"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
 )
 
 // cmdPatchlog rolls up every executed area into PATCHLOG.md — a deterministic,

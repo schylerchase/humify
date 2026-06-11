@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
-	"humify/internal/humify/detect"
-	"humify/internal/humify/ignore"
-	"humify/internal/humify/scan"
-	"humify/internal/humify/state"
+	"github.com/schylerryan/humify/internal/humify/detect"
+	"github.com/schylerryan/humify/internal/humify/ignore"
+	"github.com/schylerryan/humify/internal/humify/scan"
+	"github.com/schylerryan/humify/internal/humify/state"
 )
 
 // Tool and Version identify the producer in every Analysis.

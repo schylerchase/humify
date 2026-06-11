@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"humify/internal/layout"
+	"github.com/schylerryan/humify/internal/layout"
 )
 
 func TestSaveLoadRoundTrip(t *testing.T) {

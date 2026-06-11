@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"humify/internal/audit"
-	"humify/internal/handoff"
-	"humify/internal/intel"
-	"humify/internal/layout"
-	"humify/internal/output"
+	"github.com/schylerryan/humify/internal/audit"
+	"github.com/schylerryan/humify/internal/handoff"
+	"github.com/schylerryan/humify/internal/intel"
+	"github.com/schylerryan/humify/internal/layout"
+	"github.com/schylerryan/humify/internal/output"
 )
 
 // cmdAudit plans the audit fan-out: derive which areas still need an auditor,

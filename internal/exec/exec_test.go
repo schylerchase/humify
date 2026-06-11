@@ -3,7 +3,7 @@ package exec
 import (
 	"testing"
 
-	"humify/internal/worktree"
+	"github.com/schylerryan/humify/internal/worktree"
 )
 
 func TestCurrentWavePicksLowestWithWork(t *testing.T) {
