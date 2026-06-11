@@ -42,28 +42,29 @@ type Manifest struct {
 
 // ValSummary is the apply-time validation outcome stored with a quarantine.
 type ValSummary struct {
-	Ran           bool     `json:"ran"`
-	Passed        bool     `json:"passed"`
+	Ran            bool     `json:"ran"`
+	Passed         bool     `json:"passed"`
 	AlreadyFailing []string `json:"already_failing,omitempty"` // kinds that failed before the change
-	NewlyFailing  []string `json:"newly_failing,omitempty"`   // kinds that newly failed (regression)
-	Fixed         []string `json:"fixed,omitempty"`           // kinds that newly passed
-	Detail        string   `json:"detail"`
+	NewlyFailing   []string `json:"newly_failing,omitempty"`   // kinds that newly failed (regression)
+	Fixed          []string `json:"fixed,omitempty"`           // kinds that newly passed
+	Detail         string   `json:"detail"`
 }
 
-// Result is what apply did, for the command layer to render.
+// Result is what apply did, for the command layer to render. JSON tags are
+// snake_case to match the rest of the surface (plan.Item, verify.Validation).
 type Result struct {
-	ItemID       string
-	Action       string
-	DryRun       bool
-	Applied      bool
-	Skipped      bool
-	RolledBack   bool
-	RepoDirty    bool
-	Validated    bool // a validation command actually ran to confirm the change
-	Moves        []FileMove
-	Validation   *verify.Validation
-	ManifestPath string
-	Message      string
+	ItemID       string             `json:"item_id"`
+	Action       string             `json:"action"`
+	DryRun       bool               `json:"dry_run"`
+	Applied      bool               `json:"applied"`
+	Skipped      bool               `json:"skipped"`
+	RolledBack   bool               `json:"rolled_back"`
+	RepoDirty    bool               `json:"repo_dirty"`
+	Validated    bool               `json:"validated"` // a validation command actually ran to confirm the change
+	Moves        []FileMove         `json:"moves"`
+	Validation   *verify.Validation `json:"validation,omitempty"`
+	ManifestPath string             `json:"manifest_path,omitempty"`
+	Message      string             `json:"message"`
 }
 
 // Apply executes one plan item. dryRun (the default) only describes the change;
@@ -124,10 +125,10 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 	res.Validation = &post
 	res.Validated = post.Validated
 
-	if regressed(baseline, post) {
+	if outcome, kinds := gate(baseline, post); outcome != gateOK {
 		restore(moves)
 		res.RolledBack = true
-		res.Message = "Validation regressed after quarantine — change rolled back, no files moved. Investigate before retrying."
+		res.Message = "Rolled back the quarantine: " + rollbackReason(outcome, kinds) + ". No files were moved; investigate before retrying."
 		return res, nil
 	}
 
@@ -161,9 +162,9 @@ func performAgentApply(root string, item plan.Item, agentCmd string, now time.Ti
 	res.Validation = &post
 	res.Validated = post.Validated
 
-	if regressed(baseline, post) {
+	if outcome, kinds := gate(baseline, post); outcome != gateOK {
 		res.RolledBack = true
-		res.Message = "Validation regressed after agent changes — run `git diff` to review and `git checkout -- .` to revert. The agent's changes are still in the working tree."
+		res.Message = "Stopped after agent changes: " + rollbackReason(outcome, kinds) + ". The agent's edits are still in the working tree — run `git diff` to review and revert before committing."
 		return res, nil
 	}
 
@@ -238,21 +239,73 @@ func writeManifest(root string, item plan.Item, moves []FileMove, baseline, post
 	return path, nil
 }
 
-// regressed reports whether any validation kind that passed in baseline failed
-// afterward — the signal that the change broke something.
-func regressed(baseline, post verify.Validation) bool {
-	passedBefore := map[string]bool{}
+// gateOutcome is the verdict of comparing post-change validation against the
+// baseline. It drives both the keep/rollback decision and the message it carries,
+// so the two can never disagree about why a change was reverted.
+type gateOutcome int
+
+const (
+	gateOK           gateOutcome = iota // safe to keep
+	gateRegressed                       // a kind that was not already broken now cleanly fails
+	gateUnverifiable                    // a kind's safety could not be confirmed (timed out / could not run)
+)
+
+// gate classifies a change at kind granularity (build/test/lint), returning the
+// verdict and the kinds responsible. A command is a "clean fail" when it ran and
+// exited with a real status (ExitCode >= 0); "indeterminate" when it ran but
+// produced no clean status (ExitCode < 0: timed out, signalled, or failed to
+// launch) — in which case we genuinely do not know whether that kind passes.
+//
+// Per kind: a post pass is fine. A post clean-fail is a regression UNLESS the
+// baseline also cleanly failed it (then it is pre-existing). A post indeterminate
+// is unverifiable UNLESS the baseline cleanly failed it — a kind that was already
+// broken has no passing behavior left to protect, so being unable to verify it is
+// not a reason to roll back. A regressed kind outranks an unverifiable one.
+//
+// This is the fix for the silent-disable hole: previously an indeterminate baseline
+// counted as "failed", so a real post-failure on that kind was waved through as
+// "already failing — no regression".
+func gate(baseline, post verify.Validation) (gateOutcome, []string) {
+	baseCleanFail := map[string]bool{}
 	for _, c := range baseline.Commands {
-		if c.Ran && c.Passed {
-			passedBefore[c.Kind] = true
+		if c.Ran && !c.Passed && c.ExitCode >= 0 {
+			baseCleanFail[c.Kind] = true
 		}
 	}
+	var regressed, unverifiable []string
 	for _, c := range post.Commands {
-		if c.Ran && !c.Passed && passedBefore[c.Kind] {
-			return true
+		switch {
+		case !c.Ran || c.Passed:
+			// nothing to protect against
+		case c.ExitCode < 0: // indeterminate
+			if !baseCleanFail[c.Kind] {
+				unverifiable = append(unverifiable, c.Kind)
+			}
+		default: // clean fail
+			if !baseCleanFail[c.Kind] {
+				regressed = append(regressed, c.Kind)
+			}
 		}
 	}
-	return false
+	if len(regressed) > 0 {
+		return gateRegressed, regressed
+	}
+	if len(unverifiable) > 0 {
+		return gateUnverifiable, unverifiable
+	}
+	return gateOK, nil
+}
+
+// rollbackReason renders why a change was reverted so the quarantine and agent
+// paths describe the same gate verdict identically.
+func rollbackReason(outcome gateOutcome, kinds []string) string {
+	switch outcome {
+	case gateRegressed:
+		return fmt.Sprintf("validation regressed — %s newly failed", strings.Join(kinds, ", "))
+	case gateUnverifiable:
+		return fmt.Sprintf("could not verify the change — %s did not complete (timed out or failed to run); raise --timeout or stabilize the command", strings.Join(kinds, ", "))
+	}
+	return ""
 }
 
 // runAgent executes agentCmd through the shell with spec on stdin. Unlike
@@ -279,35 +332,40 @@ func gitDirty(root string) bool {
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
-// computeDelta classifies kinds into already-failing (failed before and after),
-// newly-failing (regression — passed before, failed after), and fixed (failed
-// before, passed after). It operates at kind granularity: humify sees pass/fail
-// per kind (build/test/lint), not individual test cases within a kind.
+// computeDelta classifies kinds into already-failing (cleanly failed before and
+// after), newly-failing (regression — passed before, cleanly failed after), and
+// fixed (cleanly failed before, passed after). "Failed" means a clean fail
+// (ExitCode >= 0); an indeterminate result (timeout/launch error, ExitCode < 0) is
+// deliberately NOT counted as a failure here, so a baseline that merely timed out
+// is never reported as "already failing". The gate rolls indeterminate post kinds
+// back, so this success-path summary never has to describe one.
 func computeDelta(baseline, post verify.Validation) (alreadyFailing, newlyFailing, fixed []string) {
 	basePassed := map[string]bool{}
-	baseFailed := map[string]bool{}
+	baseCleanFail := map[string]bool{}
 	for _, c := range baseline.Commands {
 		if !c.Ran {
 			continue
 		}
-		if c.Passed {
+		switch {
+		case c.Passed:
 			basePassed[c.Kind] = true
-		} else {
-			baseFailed[c.Kind] = true
+		case c.ExitCode >= 0:
+			baseCleanFail[c.Kind] = true
 		}
 	}
 	for _, c := range post.Commands {
 		if !c.Ran {
 			continue
 		}
-		if c.Passed {
-			if baseFailed[c.Kind] {
+		switch {
+		case c.Passed:
+			if baseCleanFail[c.Kind] {
 				fixed = append(fixed, c.Kind)
 			}
-		} else {
+		case c.ExitCode >= 0: // clean fail
 			if basePassed[c.Kind] {
 				newlyFailing = append(newlyFailing, c.Kind)
-			} else if baseFailed[c.Kind] {
+			} else if baseCleanFail[c.Kind] {
 				alreadyFailing = append(alreadyFailing, c.Kind)
 			}
 		}
@@ -324,7 +382,8 @@ func applyValidationNote(baseline, post verify.Validation) string {
 	}
 	already, newly, fixed := computeDelta(baseline, post)
 	if len(newly) > 0 {
-		// Should not reach here (regressed() would have rolled back), but be honest.
+		// Should not reach here (gate() returns gateRegressed and the change is
+		// rolled back before this note is rendered), but be honest if it does.
 		return fmt.Sprintf("Regression detected: %s newly failed after this change.", strings.Join(newly, ", "))
 	}
 	if len(already) > 0 {

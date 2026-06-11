@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -169,19 +170,97 @@ func TestApplyRollsBackOnRegression(t *testing.T) {
 	}
 }
 
-func TestRegressedDetectsNewlyFailing(t *testing.T) {
-	baseline := verify.Validation{Commands: []verify.CmdResult{{Kind: "test", Ran: true, Passed: true}}}
-	post := verify.Validation{Commands: []verify.CmdResult{{Kind: "test", Ran: true, Passed: false}}}
-	if !regressed(baseline, post) {
-		t.Error("a test that passed then failed is a regression")
+// cpass/cfail/cindet build the three CmdResult states the gate distinguishes:
+// a clean pass, a clean fail (real non-zero exit), and an indeterminate result
+// (ExitCode -1 — timed out or could not run). val wraps them into a Validation.
+func cpass(kind string) verify.CmdResult {
+	return verify.CmdResult{Kind: kind, Ran: true, Passed: true}
+}
+func cfail(kind string) verify.CmdResult {
+	return verify.CmdResult{Kind: kind, Ran: true, Passed: false, ExitCode: 1}
+}
+func cindet(kind string) verify.CmdResult {
+	return verify.CmdResult{Kind: kind, Ran: true, Passed: false, ExitCode: -1}
+}
+
+func val(cmds ...verify.CmdResult) verify.Validation {
+	v := verify.Validation{Commands: cmds, Validated: len(cmds) > 0, Passed: true}
+	for _, c := range cmds {
+		if c.Ran && !c.Passed {
+			v.Passed = false
+		}
 	}
-	if regressed(baseline, baseline) {
-		t.Error("identical results are not a regression")
+	return v
+}
+
+func sameKinds(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	// A pre-existing failure (failing in both) is NOT a regression caused by apply.
-	preExisting := verify.Validation{Commands: []verify.CmdResult{{Kind: "test", Ran: true, Passed: false}}}
-	if regressed(preExisting, post) {
-		t.Error("a pre-existing failure must not count as a regression")
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestGate is the full baseline→post truth table for apply's safety gate. The
+// load-bearing row is indeterminate→clean-fail: it used to be silently waved
+// through as "already failing" because an indeterminate baseline counted as a
+// failure, disabling the only regression check.
+func TestGate(t *testing.T) {
+	tests := []struct {
+		name     string
+		baseline verify.Validation
+		post     verify.Validation
+		want     gateOutcome
+		kinds    []string
+	}{
+		{"pass→pass: ok", val(cpass("test")), val(cpass("test")), gateOK, nil},
+		{"pass→cleanfail: regressed", val(cpass("test")), val(cfail("test")), gateRegressed, []string{"test"}},
+		{"cleanfail→cleanfail: pre-existing, ok", val(cfail("test")), val(cfail("test")), gateOK, nil},
+		{"indeterminate→cleanfail: regressed (THE HOLE)", val(cindet("test")), val(cfail("test")), gateRegressed, []string{"test"}},
+		{"pass→indeterminate: unverifiable", val(cpass("test")), val(cindet("test")), gateUnverifiable, []string{"test"}},
+		{"indeterminate→indeterminate: unverifiable", val(cindet("test")), val(cindet("test")), gateUnverifiable, []string{"test"}},
+		{"cleanfail→indeterminate: ok (nothing to protect)", val(cfail("test")), val(cindet("test")), gateOK, nil},
+		{"indeterminate→pass: ok", val(cindet("test")), val(cpass("test")), gateOK, nil},
+		{"regressed outranks unverifiable", val(cpass("build"), cpass("test")), val(cfail("build"), cindet("test")), gateRegressed, []string{"build"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, kinds := gate(tt.baseline, tt.post)
+			if got != tt.want || !sameKinds(kinds, tt.kinds) {
+				t.Errorf("gate = (%d, %v), want (%d, %v)", got, kinds, tt.want, tt.kinds)
+			}
+		})
+	}
+}
+
+func TestComputeDelta(t *testing.T) {
+	if a, n, f := computeDelta(val(cfail("test")), val(cpass("test"))); !sameKinds(f, []string{"test"}) || len(a)+len(n) != 0 {
+		t.Errorf("cleanfail→pass should be fixed only; got already=%v newly=%v fixed=%v", a, n, f)
+	}
+	if a, n, f := computeDelta(val(cpass("test")), val(cfail("test"))); !sameKinds(n, []string{"test"}) || len(a)+len(f) != 0 {
+		t.Errorf("pass→cleanfail should be newly-failing only; got already=%v newly=%v fixed=%v", a, n, f)
+	}
+	if a, n, f := computeDelta(val(cfail("test")), val(cfail("test"))); !sameKinds(a, []string{"test"}) || len(n)+len(f) != 0 {
+		t.Errorf("cleanfail→cleanfail should be already-failing only; got already=%v newly=%v fixed=%v", a, n, f)
+	}
+	// The honesty fix: an indeterminate baseline that then passes is NOT "fixed"
+	// (it was never known to be failing).
+	if a, n, f := computeDelta(val(cindet("test")), val(cpass("test"))); len(a)+len(n)+len(f) != 0 {
+		t.Errorf("indeterminate→pass must classify as nothing; got already=%v newly=%v fixed=%v", a, n, f)
+	}
+}
+
+func TestApplyValidationNote(t *testing.T) {
+	// An indeterminate baseline must never be described as "already failing".
+	if note := applyValidationNote(val(cindet("test")), val(cpass("test"))); strings.Contains(note, "already failing") {
+		t.Errorf("indeterminate baseline must not read as already-failing: %q", note)
+	}
+	if note := applyValidationNote(val(cfail("test")), val(cfail("test"))); !strings.Contains(note, "already failing") {
+		t.Errorf("a genuine pre-existing failure should say so: %q", note)
 	}
 }
 
