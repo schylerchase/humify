@@ -167,20 +167,36 @@ func printDoctor(root string, checks []check) {
 	}
 }
 
-func passLabel(ok bool) string {
-	if ok {
-		return "PASSED"
-	}
-	return "FAILED"
-}
-
 // verifyVerdict reports an honest status: a validation that ran nothing is "NOT
-// VALIDATED", never "PASSED".
+// VALIDATED", never "PASSED". On failure it names the failing kind(s) and notes any
+// that passed, so a single failing check does not read as a total wipeout — and so a
+// pre-existing failure (which apply tolerates) is not mistaken for a hard block.
 func verifyVerdict(v verify.Validation) string {
 	if !v.Validated {
 		return "NOT VALIDATED"
 	}
-	return passLabel(v.Passed)
+	if v.Passed {
+		return "PASSED"
+	}
+	var failed, passed []string
+	for _, c := range v.Commands {
+		if !c.Ran {
+			continue
+		}
+		if c.Passed {
+			passed = append(passed, c.Kind)
+		} else {
+			failed = append(failed, c.Kind)
+		}
+	}
+	if len(failed) == 0 {
+		return "FAILED"
+	}
+	verdict := "FAILED: " + strings.Join(failed, ", ")
+	if len(passed) > 0 {
+		verdict += " (" + strings.Join(passed, ", ") + " passed)"
+	}
+	return verdict
 }
 
 func relTo(planID string) string {
