@@ -359,12 +359,18 @@ apply    the only command that changes source — and only conservatively. Defau
          that humify normally refuses to automate.
 
          example:
-           humify apply --target HMF-002 --unsafe-permission --agent-cmd="claude --print" --yes
+           humify apply --target HMF-002 --unsafe-permission --agent-cmd="claude --print --dangerously-skip-permissions" --yes
+
+         The agent-cmd must be able to write files unattended; for claude that means
+         --dangerously-skip-permissions, or its per-file write prompts will block.
+         At an interactive terminal apply also asks for a typed "yes"; when stdin is
+         not a TTY (CI, scripts, agents) the two flags suffice and it runs unattended.
 
 safety: analyze, plan, verify, status, and doctor never modify target source.
         apply quarantines (never deletes) and is reversible.
-        apply --unsafe-permission mutates source via an agent — requires three
-        explicit confirmations and rolls back on regression, but is not reversible
+        apply --unsafe-permission mutates source via an agent — requires the
+        --unsafe-permission and --yes flags (plus a typed confirmation at an
+        interactive terminal) and rolls back on regression, but is not reversible
         in the same mechanical sense as a quarantine.
 exit codes: 0 ok · 1 error · 2 verify failed or apply rolled back`)
 }
