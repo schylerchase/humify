@@ -142,8 +142,17 @@ func order(signal string) int {
 	return 1
 }
 
+// agentFileSizeLimit is the max LOC a file may have to be included in an agent
+// spec. Files larger than this tend to exhaust agent context or cause OOM kills;
+// they are noted in the spec as "too large" rather than silently dropped.
+const agentFileSizeLimit = 3000
+
 // Build produces a prioritized plan from an analysis.
 func Build(a analyze.Analysis) Plan {
+	fileLOC := make(map[string]int, len(a.Files))
+	for _, fs := range a.Files {
+		fileLOC[fs.Path] = fs.Metrics.LOC
+	}
 	groups := groupBySignal(a.Findings)
 	items := make([]Item, 0, len(groups))
 	for signal, fs := range groups {
@@ -151,7 +160,7 @@ func Build(a analyze.Analysis) Plan {
 		if !ok {
 			continue
 		}
-		items = append(items, buildItem(signal, tpl, fs))
+		items = append(items, buildItem(signal, tpl, fs, fileLOC))
 	}
 	sortItems(items, a.Findings)
 	for i := range items {
@@ -170,7 +179,7 @@ func Build(a analyze.Analysis) Plan {
 }
 
 // buildItem assembles one refactor item from a signal's findings.
-func buildItem(signal string, tpl template, fs []analyze.Finding) Item {
+func buildItem(signal string, tpl template, fs []analyze.Finding, fileLOC map[string]int) Item {
 	item := Item{
 		Signal: signal, Title: tpl.title, Problem: tpl.problem, WhyItMatters: tpl.why,
 		RecommendedChange: tpl.change, ExpectedBenefit: tpl.benefit,
@@ -190,7 +199,7 @@ func buildItem(signal string, tpl template, fs []analyze.Finding) Item {
 		}
 	}
 	sort.Strings(item.Files)
-	item.AgentSpec = buildAgentSpec(signal, tpl, item)
+	item.AgentSpec = buildAgentSpec(signal, tpl, item, fileLOC)
 	return item
 }
 
@@ -212,7 +221,9 @@ var signalInstructions = map[string]string{
 // buildAgentSpec constructs a structured prompt an agent can execute verbatim
 // when --unsafe-permission is used. It names the exact files, evidence, and
 // transformation rule so the agent needs no additional context to act.
-func buildAgentSpec(signal string, tpl template, item Item) string {
+// Files exceeding agentFileSizeLimit LOC are excluded with an explicit note so
+// the agent is not overwhelmed and the user knows they were skipped.
+func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]int) string {
 	if tpl.safety == "safe" {
 		return "" // safe items use the quarantine path, not an agent
 	}
@@ -220,12 +231,28 @@ func buildAgentSpec(signal string, tpl template, item Item) string {
 	if !ok {
 		instr = tpl.change
 	}
+
+	var within, tooLarge []string
+	for _, f := range item.Files {
+		if loc, known := fileLOC[f]; known && loc > agentFileSizeLimit {
+			tooLarge = append(tooLarge, fmt.Sprintf("%s (%d lines)", f, loc))
+		} else {
+			within = append(within, f)
+		}
+	}
+
 	var b strings.Builder
 	b.WriteString("You are executing a targeted refactor for humify. Apply the following change precisely and conservatively.\n\n")
 	fmt.Fprintf(&b, "Signal: %s\nTask: %s\n\n", signal, tpl.title)
 	b.WriteString("Files to modify:\n")
-	for _, f := range item.Files {
+	for _, f := range within {
 		fmt.Fprintf(&b, "  - %s\n", f)
+	}
+	if len(tooLarge) > 0 {
+		b.WriteString("\nFiles excluded (too large for a single agent pass — address separately):\n")
+		for _, f := range tooLarge {
+			fmt.Fprintf(&b, "  - %s\n", f)
+		}
 	}
 	if len(item.Evidence) > 0 {
 		b.WriteString("\nEvidence (file:line finding):\n")
@@ -236,11 +263,11 @@ func buildAgentSpec(signal string, tpl template, item Item) string {
 	fmt.Fprintf(&b, "\nTransformation rule:\n  %s\n", instr)
 	b.WriteString("\nConstraints:\n")
 	b.WriteString("  - Do not change observable behavior beyond what the transformation requires.\n")
-	b.WriteString("  - Do not touch files not listed above. This is a hard rule — no exceptions.\n")
+	b.WriteString("  - Do not touch files not listed under \"Files to modify\" above. This is a hard rule — no exceptions.\n")
 	b.WriteString("  - Never modify generated or compiled output: dist/, build/, .next/, out/, coverage/, node_modules/, vendor/, target/, __pycache__/.\n")
 	b.WriteString("  - Never create planning, notes, or scratch files in the repository.\n")
 	b.WriteString("  - If a listed file no longer exists or the finding no longer applies, skip it and say why.\n")
-	b.WriteString("  - After all changes, run `humify verify` and report the result.\n")
+	b.WriteString("  - Do not run builds or test suites. Humify will validate the change after you exit.\n")
 	b.WriteString("\nWhen complete, output a short summary of what you changed and why.\n")
 	return b.String()
 }

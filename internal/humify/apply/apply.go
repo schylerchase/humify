@@ -42,9 +42,12 @@ type Manifest struct {
 
 // ValSummary is the apply-time validation outcome stored with a quarantine.
 type ValSummary struct {
-	Ran    bool   `json:"ran"`
-	Passed bool   `json:"passed"`
-	Detail string `json:"detail"`
+	Ran           bool     `json:"ran"`
+	Passed        bool     `json:"passed"`
+	AlreadyFailing []string `json:"already_failing,omitempty"` // kinds that failed before the change
+	NewlyFailing  []string `json:"newly_failing,omitempty"`   // kinds that newly failed (regression)
+	Fixed         []string `json:"fixed,omitempty"`           // kinds that newly passed
+	Detail        string   `json:"detail"`
 }
 
 // Result is what apply did, for the command layer to render.
@@ -128,7 +131,7 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 		return res, nil
 	}
 
-	manifestPath, err := writeManifest(root, item, moves, post)
+	manifestPath, err := writeManifest(root, item, moves, baseline, post)
 	if err != nil {
 		restore(moves)
 		return res, fmt.Errorf("quarantine rolled back: could not write manifest: %w", err)
@@ -136,7 +139,7 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 	res.Applied = true
 	res.ManifestPath = manifestPath
 	res.Message = fmt.Sprintf("Quarantined %d file(s) into %s. %s Restore by moving files back from that directory.",
-		len(moves), relQuarantine(item.ID), validationNote(post))
+		len(moves), relQuarantine(item.ID), applyValidationNote(baseline, post))
 	return res, nil
 }
 
@@ -165,7 +168,7 @@ func performAgentApply(root string, item plan.Item, agentCmd string, now time.Ti
 	}
 
 	res.Applied = true
-	res.Message = fmt.Sprintf("Agent completed %s (%s). %s Review changes with `git diff` before committing.", item.ID, item.Title, validationNote(post))
+	res.Message = fmt.Sprintf("Agent completed %s (%s). %s Review changes with `git diff` before committing.", item.ID, item.Title, applyValidationNote(baseline, post))
 	return res, nil
 }
 
@@ -212,12 +215,17 @@ func restore(moves []FileMove) {
 }
 
 // writeManifest records the quarantine so it is auditable and reversible.
-func writeManifest(root string, item plan.Item, moves []FileMove, post verify.Validation) (string, error) {
+func writeManifest(root string, item plan.Item, moves []FileMove, baseline, post verify.Validation) (string, error) {
+	already, newly, fixed := computeDelta(baseline, post)
 	man := Manifest{
 		Schema: state.Schema, Tool: "humify", PlanItem: item.ID,
-		Timestamp:  post.GeneratedAt,
-		Validation: ValSummary{Ran: post.Validated, Passed: post.Validated && post.Passed, Detail: validationNote(post)},
-		Files:      relManifest(root, moves),
+		Timestamp: post.GeneratedAt,
+		Validation: ValSummary{
+			Ran: post.Validated, Passed: post.Validated && post.Passed,
+			AlreadyFailing: already, NewlyFailing: newly, Fixed: fixed,
+			Detail: applyValidationNote(baseline, post),
+		},
+		Files: relManifest(root, moves),
 	}
 	data, err := json.MarshalIndent(man, "", "  ")
 	if err != nil {
@@ -271,15 +279,66 @@ func gitDirty(root string) bool {
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
-// validationNote summarizes a validation run for human output.
-func validationNote(v verify.Validation) string {
-	if !v.Validated {
-		return "No validation commands detected, so the change could not be auto-verified — review the quarantine."
+// computeDelta classifies kinds into already-failing (failed before and after),
+// newly-failing (regression — passed before, failed after), and fixed (failed
+// before, passed after). It operates at kind granularity: humify sees pass/fail
+// per kind (build/test/lint), not individual test cases within a kind.
+func computeDelta(baseline, post verify.Validation) (alreadyFailing, newlyFailing, fixed []string) {
+	basePassed := map[string]bool{}
+	baseFailed := map[string]bool{}
+	for _, c := range baseline.Commands {
+		if !c.Ran {
+			continue
+		}
+		if c.Passed {
+			basePassed[c.Kind] = true
+		} else {
+			baseFailed[c.Kind] = true
+		}
 	}
-	if v.Passed {
-		return "Validation passed after the change."
+	for _, c := range post.Commands {
+		if !c.Ran {
+			continue
+		}
+		if c.Passed {
+			if baseFailed[c.Kind] {
+				fixed = append(fixed, c.Kind)
+			}
+		} else {
+			if basePassed[c.Kind] {
+				newlyFailing = append(newlyFailing, c.Kind)
+			} else if baseFailed[c.Kind] {
+				alreadyFailing = append(alreadyFailing, c.Kind)
+			}
+		}
 	}
-	return "Validation reported failures (see .humify/validation.json) — review before trusting the change."
+	return alreadyFailing, newlyFailing, fixed
+}
+
+// applyValidationNote produces a delta-aware summary for human output. It
+// distinguishes pre-existing failures from new regressions so users are not
+// misled by failures that existed before the change.
+func applyValidationNote(baseline, post verify.Validation) string {
+	if !post.Validated {
+		return "No validation commands detected — the change could not be auto-verified."
+	}
+	already, newly, fixed := computeDelta(baseline, post)
+	if len(newly) > 0 {
+		// Should not reach here (regressed() would have rolled back), but be honest.
+		return fmt.Sprintf("Regression detected: %s newly failed after this change.", strings.Join(newly, ", "))
+	}
+	if len(already) > 0 {
+		note := fmt.Sprintf("The %s check(s) were already failing before this change — no previously-passing check regressed.", strings.Join(already, ", "))
+		if len(fixed) > 0 {
+			note += fmt.Sprintf(" This change fixed: %s.", strings.Join(fixed, ", "))
+		}
+		note += " A pre-existing failure can mask new breakage within the same kind; review `git diff` and test output before committing."
+		return note
+	}
+	if len(fixed) > 0 {
+		return fmt.Sprintf("Validation passed. This change fixed: %s.", strings.Join(fixed, ", "))
+	}
+	return "Validation passed after the change."
 }
 
 // relManifest rewrites move paths to be root-relative for the on-disk manifest.
