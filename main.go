@@ -33,24 +33,25 @@ const (
 )
 
 type options struct {
-	path       string
-	root       string
-	target     string // heatmap target dir, OR the HMF-### plan item for apply
-	runner     string
-	testCmd    string
-	agentCmd   string // spawn runner: agent command (prompt piped on stdin)
-	stage      string // untangle verify <stage>
-	configPath string // explicit humify.config.json path (product commands)
-	args       []string
-	godLOC     int
-	maxReplans int
-	jobs       int           // spawn runner: max concurrent agents
-	timeout    time.Duration // spawn runner: per-agent wall-clock cap (0 → runner default)
-	json       bool
-	yes             bool // apply: confirm a source-changing action
-	dryRun          bool // apply: describe without changing
-	markdown        bool // product commands: also write the optional markdown report
-	execute         bool // untangle run: opt in to the source-modifying execute stage
+	path             string
+	root             string
+	target           string // heatmap target dir, OR the HMF-### plan item for apply
+	runner           string
+	testCmd          string
+	agentCmd         string // spawn runner: agent command (prompt piped on stdin)
+	stage            string // untangle verify <stage>
+	configPath       string // explicit humify.config.json path (product commands)
+	unknownFlag      string // first unrecognized -flag seen; run() turns it into an error
+	args             []string
+	godLOC           int
+	maxReplans       int
+	jobs             int           // spawn runner: max concurrent agents
+	timeout          time.Duration // spawn runner: per-agent wall-clock cap (0 → runner default)
+	json             bool
+	yes              bool // apply: confirm a source-changing action
+	dryRun           bool // apply: describe without changing
+	markdown         bool // product commands: also write the optional markdown report
+	execute          bool // untangle run: opt in to the source-modifying execute stage
 	unsafePermission bool // apply: unlock autonomous agent execution for manual/assisted items
 }
 
@@ -62,6 +63,11 @@ func main() {
 
 func run(args []string) int {
 	cmd, opts := parseArgs(args)
+	if opts.unknownFlag != "" {
+		fmt.Fprintf(os.Stderr, "unknown flag: %s\n\n", opts.unknownFlag)
+		printUsage()
+		return exitError
+	}
 	switch cmd {
 	case "analyze":
 		return cmdAnalyze(opts)
@@ -135,7 +141,8 @@ func runUntangle(opts options) int {
 
 // parseArgs parses flags and positionals. Value flags accept both `--flag=value`
 // and `--flag value`; the first bare token is the command and the rest are
-// positionals (opts.args), interpreted per command. Unknown flags are ignored.
+// positionals (opts.args), interpreted per command. An unrecognized flag is
+// recorded in opts.unknownFlag so run() can reject it rather than drop it silently.
 func parseArgs(args []string) (string, options) {
 	opts := options{path: ".", godLOC: defaultGodLOC, jobs: 4}
 	var cmd string
@@ -195,8 +202,18 @@ func parseArgs(args []string) (string, options) {
 			if d, err := time.ParseDuration(value()); err == nil && d > 0 {
 				opts.timeout = d
 			}
+		case a == "-h" || a == "--help":
+			// Help request; routed to printUsage via the empty/help command path.
+			if cmd == "" {
+				cmd = "help"
+			}
 		case strings.HasPrefix(a, "-"):
-			// Unknown flag — ignore so a typo never silently becomes a positional.
+			// Unrecognized flag. Record the first one so run() can fail loudly
+			// instead of silently dropping it — a typo'd `--yes` must never run as
+			// a no-op dry run that exits 0 and fools a scripted caller.
+			if opts.unknownFlag == "" {
+				opts.unknownFlag = a
+			}
 		case cmd == "":
 			cmd = a
 		default:
