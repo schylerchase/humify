@@ -16,10 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
 	"github.com/schylerryan/humify/internal/humify/plan"
 	"github.com/schylerryan/humify/internal/humify/state"
 	"github.com/schylerryan/humify/internal/humify/verify"
-	"github.com/schylerryan/humify/internal/spawn"
 )
 
 // FileMove records one quarantined file for the manifest.
@@ -148,7 +149,7 @@ func performAgentApply(root string, item plan.Item, agentCmd string, now time.Ti
 	res.RepoDirty = gitDirty(root)
 
 	baseline, _ := verify.Run(root, now)
-	if err := spawn.ShellExec(root, agentCmd, item.AgentSpec, 10*time.Minute); err != nil {
+	if err := runAgent(root, agentCmd, item.AgentSpec, 30*time.Minute); err != nil {
 		res.Message = fmt.Sprintf("Agent exited with error: %v. Source may be partially modified — review with `git diff` and revert if needed.", err)
 		return res, nil
 	}
@@ -244,6 +245,21 @@ func regressed(baseline, post verify.Validation) bool {
 		}
 	}
 	return false
+}
+
+// runAgent executes agentCmd through the shell with spec on stdin. Unlike
+// spawn.ShellExec it does NOT set Setpgid, so the agent runs in the same
+// process group as humify and can access the terminal normally — required for
+// interactive CLI agents (claude, aider, etc.) that need TTY control.
+func runAgent(dir, agentCmd, spec string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", agentCmd)
+	cmd.Dir = dir
+	cmd.Stdin = strings.NewReader(spec)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // gitDirty reports whether the repo has uncommitted changes. A non-repo or missing
