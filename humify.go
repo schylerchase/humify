@@ -101,12 +101,19 @@ func cmdApply(opts options) int {
 	if opts.unsafePermission && opts.yes && !opts.dryRun {
 		fmt.Fprintln(os.Stderr, "⚠  WARNING: --unsafe-permission will spawn an agent to autonomously rewrite source code.")
 		fmt.Fprintln(os.Stderr, "   The change is validated and reverted on regression, but it is not mechanically reversible like a quarantine.")
-		fmt.Fprintln(os.Stderr, "   Type \"yes\" to proceed, anything else to abort:")
-		var confirm string
-		fmt.Fscan(os.Stdin, &confirm)
-		if confirm != "yes" {
-			fmt.Fprintln(os.Stderr, "Aborted.")
-			return exitError
+		fmt.Fprintln(os.Stderr, "   Ensure --agent-cmd can write files unattended (e.g. claude needs --dangerously-skip-permissions).")
+		// The interactive "yes" is a speed bump for a human at a terminal. When stdin
+		// is not a TTY (scripted, piped, background, agent-driven) there is nobody to
+		// prompt and fmt.Fscan would block forever — the two explicit flags above are
+		// the deliberate signal, so proceed without prompting.
+		if isInteractive(os.Stdin) {
+			fmt.Fprintln(os.Stderr, "   Type \"yes\" to proceed, anything else to abort:")
+			var confirm string
+			fmt.Fscan(os.Stdin, &confirm)
+			if confirm != "yes" {
+				fmt.Fprintln(os.Stderr, "Aborted.")
+				return exitError
+			}
 		}
 	}
 	res, err := apply.Apply(root, p, opts.target, opts.dryRun, opts.yes, opts.agentCmd, opts.unsafePermission, time.Now())
@@ -124,6 +131,14 @@ func cmdApply(opts options) int {
 		return exitDrift
 	}
 	return exitOK
+}
+
+// isInteractive reports whether f is a terminal (character device) rather than a
+// pipe, file, or closed stream. Used to decide whether prompting a human makes
+// sense; a non-TTY would block on a read that no one can answer.
+func isInteractive(f *os.File) bool {
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // cmdStatus prints the current Humify state from .humify/ JSON.
