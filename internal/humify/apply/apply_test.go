@@ -37,7 +37,7 @@ func TestApplyQuarantineEndToEnd(t *testing.T) {
 	}
 
 	// Dry run (default) must not move anything.
-	dry, err := Apply(root, p, "HMF-001", true, false, time.Now())
+	dry, err := Apply(root, p, "HMF-001", true, false, "", false, time.Now())
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestApplyQuarantineEndToEnd(t *testing.T) {
 	}
 
 	// Confirmed apply quarantines the file and writes a manifest.
-	res, err := Apply(root, p, "HMF-001", false, true, time.Now())
+	res, err := Apply(root, p, "HMF-001", false, true, "", false, time.Now())
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestApplyRefusesManualItem(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a swallowed_error item in the plan")
 	}
-	res, err := Apply(root, p, sw.ID, false, true, time.Now())
+	res, err := Apply(root, p, sw.ID, false, true, "", false, time.Now())
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestApplyRefusesManualItem(t *testing.T) {
 
 func TestApplyUnknownItemErrors(t *testing.T) {
 	root, p := buildRepo(t)
-	if _, err := Apply(root, p, "HMF-999", false, true, time.Now()); err == nil {
+	if _, err := Apply(root, p, "HMF-999", false, true, "", false, time.Now()); err == nil {
 		t.Error("apply on an unknown plan id must error")
 	}
 }
@@ -144,7 +144,7 @@ func TestApplyRollsBackOnRegression(t *testing.T) {
 		t.Fatalf("baseline must validate and pass; got validated=%v passed=%v", base.Validated, base.Passed)
 	}
 
-	res, err := Apply(root, plan.Build(a), item.ID, false, true, time.Now())
+	res, err := Apply(root, plan.Build(a), item.ID, false, true, "", false, time.Now())
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}

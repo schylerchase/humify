@@ -19,6 +19,7 @@ import (
 	"humify/internal/humify/plan"
 	"humify/internal/humify/state"
 	"humify/internal/humify/verify"
+	"humify/internal/spawn"
 )
 
 // FileMove records one quarantined file for the manifest.
@@ -62,16 +63,28 @@ type Result struct {
 }
 
 // Apply executes one plan item. dryRun (the default) only describes the change;
-// yes performs it. now is injected for testable timestamps.
-func Apply(root string, p plan.Plan, itemID string, dryRun, yes bool, now time.Time) (Result, error) {
+// yes performs it. agentCmd and unsafePermission together unlock autonomous agent
+// execution for assisted/manual items — the caller is responsible for the
+// double-confirmation gate before reaching here. now is injected for testable timestamps.
+func Apply(root string, p plan.Plan, itemID string, dryRun, yes bool, agentCmd string, unsafePermission bool, now time.Time) (Result, error) {
 	item, ok := p.Find(itemID)
 	if !ok {
 		return Result{}, fmt.Errorf("no plan item %q (run `humify plan` and pick an HMF-### id)", itemID)
 	}
 	res := Result{ItemID: item.ID, Action: item.Action, DryRun: dryRun}
+
+	if unsafePermission && agentCmd != "" && !item.Applyable {
+		if dryRun || !yes {
+			res.Message = fmt.Sprintf("Dry run: would spawn agent for %s (%s, safety: %s). Re-run with --yes and confirm at the prompt to execute.\n\nAgent spec:\n%s",
+				item.ID, item.Title, item.AutomationSafety, item.AgentSpec)
+			return res, nil
+		}
+		return performAgentApply(root, item, agentCmd, now)
+	}
+
 	if !item.Applyable || item.Action != "quarantine" {
 		res.Skipped = true
-		res.Message = fmt.Sprintf("%s (%s) is not auto-applyable — automation safety is %q. Humify will not modify source for this item; address it by hand, then run `humify verify`.",
+		res.Message = fmt.Sprintf("%s (%s) is not auto-applyable — automation safety is %q. Use --unsafe-permission --agent-cmd=CMD to execute autonomously, or address it by hand then run `humify verify`.",
 			item.ID, item.Title, item.AutomationSafety)
 		return res, nil
 	}
@@ -123,6 +136,35 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 	res.ManifestPath = manifestPath
 	res.Message = fmt.Sprintf("Quarantined %d file(s) into %s. %s Restore by moving files back from that directory.",
 		len(moves), relQuarantine(item.ID), validationNote(post))
+	return res, nil
+}
+
+// performAgentApply runs an external agent with the item's AgentSpec on stdin,
+// then verifies and rolls back on regression. Unlike quarantine, there is no
+// mechanical file-level undo — the agent's changes are in the working tree and
+// must be reverted via git if the verification gate fails.
+func performAgentApply(root string, item plan.Item, agentCmd string, now time.Time) (Result, error) {
+	res := Result{ItemID: item.ID, Action: "agent", Applied: false}
+	res.RepoDirty = gitDirty(root)
+
+	baseline, _ := verify.Run(root, now)
+	if err := spawn.ShellExec(root, agentCmd, item.AgentSpec, 10*time.Minute); err != nil {
+		res.Message = fmt.Sprintf("Agent exited with error: %v. Source may be partially modified — review with `git diff` and revert if needed.", err)
+		return res, nil
+	}
+
+	post, _ := verify.Run(root, now)
+	res.Validation = &post
+	res.Validated = post.Validated
+
+	if regressed(baseline, post) {
+		res.RolledBack = true
+		res.Message = "Validation regressed after agent changes — run `git diff` to review and `git checkout -- .` to revert. The agent's changes are still in the working tree."
+		return res, nil
+	}
+
+	res.Applied = true
+	res.Message = fmt.Sprintf("Agent completed %s (%s). %s Review changes with `git diff` before committing.", item.ID, item.Title, validationNote(post))
 	return res, nil
 }
 

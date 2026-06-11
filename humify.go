@@ -95,7 +95,21 @@ func cmdApply(opts options) int {
 	if err := hstate.Load(root, hstate.PlanFile, &p); err != nil {
 		return fail(opts, "no_plan", exitError, "no plan found — run `humify plan` first")
 	}
-	res, err := apply.Apply(root, p, opts.target, opts.dryRun, opts.yes, time.Now())
+	if opts.unsafePermission && opts.agentCmd == "" {
+		return fail(opts, "missing_agent_cmd", exitError, "--unsafe-permission requires --agent-cmd=CMD (the command that receives the refactor spec on stdin)")
+	}
+	if opts.unsafePermission && opts.yes && !opts.dryRun {
+		fmt.Fprintln(os.Stderr, "⚠  WARNING: --unsafe-permission will spawn an agent to autonomously rewrite source code.")
+		fmt.Fprintln(os.Stderr, "   The change is validated and reverted on regression, but it is not mechanically reversible like a quarantine.")
+		fmt.Fprintln(os.Stderr, "   Type \"yes\" to proceed, anything else to abort:")
+		var confirm string
+		fmt.Fscan(os.Stdin, &confirm)
+		if confirm != "yes" {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return exitError
+		}
+	}
+	res, err := apply.Apply(root, p, opts.target, opts.dryRun, opts.yes, opts.agentCmd, opts.unsafePermission, time.Now())
 	if err != nil {
 		return fail(opts, "apply_error", exitError, err.Error())
 	}

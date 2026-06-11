@@ -23,6 +23,9 @@ import (
 	"humify/internal/state"
 )
 
+// Version is set at build time via -ldflags "-X main.Version=vX.Y.Z".
+var Version = "dev"
+
 const (
 	exitOK    = 0 // clean
 	exitError = 1 // not a humify project / read failure
@@ -44,10 +47,11 @@ type options struct {
 	jobs       int           // spawn runner: max concurrent agents
 	timeout    time.Duration // spawn runner: per-agent wall-clock cap (0 → runner default)
 	json       bool
-	yes        bool // apply: confirm a source-changing action
-	dryRun     bool // apply: describe without changing
-	markdown   bool // product commands: also write the optional markdown report
-	execute    bool // untangle run: opt in to the source-modifying execute stage
+	yes             bool // apply: confirm a source-changing action
+	dryRun          bool // apply: describe without changing
+	markdown        bool // product commands: also write the optional markdown report
+	execute         bool // untangle run: opt in to the source-modifying execute stage
+	unsafePermission bool // apply: unlock autonomous agent execution for manual/assisted items
 }
 
 const defaultGodLOC = 1500
@@ -159,6 +163,8 @@ func parseArgs(args []string) (string, options) {
 			opts.markdown = true
 		case a == "--execute":
 			opts.execute = true
+		case a == "--unsafe-permission":
+			opts.unsafePermission = true
 		case name == "--path":
 			opts.path = value()
 		case name == "--root":
@@ -321,6 +327,7 @@ usage:
   humify status  [PATH] [--json]
   humify doctor  [PATH] [--json]
   humify apply   --target HMF-### [--dry-run | --yes] [PATH]
+  humify apply   --target HMF-### --unsafe-permission --agent-cmd=CMD [--yes] [PATH]
   humify untangle <stage> ...        (the massive-codebase workflow; see: humify untangle help)
 
 PATH defaults to the current directory. Output JSON state is written under .humify/.
@@ -342,8 +349,23 @@ apply    the only command that changes source — and only conservatively. Defau
          .humify/delete-me/<id>/ with a manifest), re-runs validation, and rolls
          back on regression. Refuses broad/manual rewrites.
 
+         --unsafe-permission unlocks autonomous agent execution for assisted and
+         manual items. Requires --agent-cmd=CMD (prompt piped on stdin), --yes,
+         and an explicit "yes" confirmation at the terminal — three gates, not one.
+         The agent receives a precise action spec built by humify plan: which files
+         to change, what transformation to apply, and what evidence supports it.
+         humify verify runs after and rolls back the entire change on any regression.
+         Use when you understand the risk and want the agent to handle a refactor
+         that humify normally refuses to automate.
+
+         example:
+           humify apply --target HMF-002 --unsafe-permission --agent-cmd="claude --print" --yes
+
 safety: analyze, plan, verify, status, and doctor never modify target source.
         apply quarantines (never deletes) and is reversible.
+        apply --unsafe-permission mutates source via an agent — requires three
+        explicit confirmations and rolls back on regression, but is not reversible
+        in the same mechanical sense as a quarantine.
 exit codes: 0 ok · 1 error · 2 verify failed or apply rolled back`)
 }
 

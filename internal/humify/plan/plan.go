@@ -8,6 +8,7 @@ package plan
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"humify/internal/humify/analyze"
@@ -26,7 +27,8 @@ type Item struct {
 	RiskLevel          string   `json:"risk_level"`        // low|medium|high
 	AutomationSafety   string   `json:"automation_safety"` // safe|assisted|manual
 	ValidationStrategy string   `json:"validation_strategy"`
-	Action             string   `json:"action"` // machine hint for apply: "quarantine" or ""
+	Action             string   `json:"action"`     // machine hint for apply: "quarantine" or ""
+	AgentSpec          string   `json:"agent_spec"` // structured prompt for --unsafe-permission agent execution
 	Applyable          bool     `json:"applyable"`
 	Files              []string `json:"files"`
 	FindingIDs         []string `json:"finding_ids"`
@@ -188,7 +190,57 @@ func buildItem(signal string, tpl template, fs []analyze.Finding) Item {
 		}
 	}
 	sort.Strings(item.Files)
+	item.AgentSpec = buildAgentSpec(signal, tpl, item)
 	return item
+}
+
+// signalInstructions gives the precise transformation rule an agent must apply
+// for each signal when --unsafe-permission is used. These are injected verbatim
+// into the AgentSpec so the agent has unambiguous instructions without guessing.
+var signalInstructions = map[string]string{
+	"swallowed_error": "Find each empty or near-empty error handler (empty catch block, `except: pass`, `if err != nil { }` with no body, etc.) and replace it with an action: return the error with context, log it and re-raise, or handle it explicitly. Never leave the handler empty. If you cannot determine the right action from context alone, add a log line and re-raise — that is always better than silence.",
+	"broad_catch":     "Find each broad exception handler (`except Exception`, `catch (Exception e)`, `rescue StandardError`, etc.) and narrow it to the specific exception type(s) the wrapped code can actually raise. Read the try/catch body to determine which exceptions are plausible. If multiple types are possible, catch each explicitly. Do not change the handler's body logic.",
+	"giant_file":      "Separate the file by responsibility. Read the file, identify its distinct concerns, and extract each into its own file with a name that states its responsibility. Update all import sites. The original file should shrink to a thin facade or be deleted if it is fully superseded.",
+	"long_function":   "Extract cohesive sub-steps out of each long function into helpers with intention-revealing names. Each extracted helper should do exactly one thing and be nameable without 'and'. Do not change observable behavior — only reorganize structure.",
+	"deep_nesting":    "Flatten deeply nested control flow using early returns and guard clauses. The outermost happy path should be linear. Move the error/edge cases to the top so they return or raise early, leaving the main path unindented.",
+	"vague_name":      "Rename each vague symbol (data, manager, helper, result, info, obj, etc.) to a name that states what it represents in the domain. Update every reference. Do not rename symbols whose names are correct; only rename the ones listed in the evidence.",
+	"noisy_comment":   "Delete each comment that merely restates the code (e.g. `// increment i` above `i++`, `# call save` above `save()`). Keep comments that explain WHY, not WHAT. If a comment has useful intent buried in noise, rewrite it to the useful part only.",
+	"todo_marker":     "Resolve each TODO/FIXME/HACK marker. For each one: if the work is done, delete the marker. If it is genuinely outstanding, convert it to a specific issue reference or a concrete comment that names the constraint. Never leave a vague marker with no resolution path.",
+	"stale_file":      "Remove or archive each file listed. Confirm it has no live importers or callers before removing. If it is imported, investigate whether the import is itself dead code and trace the dependency chain before acting.",
+}
+
+// buildAgentSpec constructs a structured prompt an agent can execute verbatim
+// when --unsafe-permission is used. It names the exact files, evidence, and
+// transformation rule so the agent needs no additional context to act.
+func buildAgentSpec(signal string, tpl template, item Item) string {
+	if tpl.safety == "safe" {
+		return "" // safe items use the quarantine path, not an agent
+	}
+	instr, ok := signalInstructions[signal]
+	if !ok {
+		instr = tpl.change
+	}
+	var b strings.Builder
+	b.WriteString("You are executing a targeted refactor for humify. Apply the following change precisely and conservatively.\n\n")
+	fmt.Fprintf(&b, "Signal: %s\nTask: %s\n\n", signal, tpl.title)
+	b.WriteString("Files to modify:\n")
+	for _, f := range item.Files {
+		fmt.Fprintf(&b, "  - %s\n", f)
+	}
+	if len(item.Evidence) > 0 {
+		b.WriteString("\nEvidence (file:line finding):\n")
+		for _, e := range item.Evidence {
+			fmt.Fprintf(&b, "  - %s\n", e)
+		}
+	}
+	fmt.Fprintf(&b, "\nTransformation rule:\n  %s\n", instr)
+	b.WriteString("\nConstraints:\n")
+	b.WriteString("  - Do not change observable behavior beyond what the transformation requires.\n")
+	b.WriteString("  - Do not touch files not listed above.\n")
+	b.WriteString("  - If a listed file no longer exists or the finding no longer applies, skip it and say why.\n")
+	b.WriteString("  - After all changes, run `humify verify` and report the result.\n")
+	b.WriteString("\nWhen complete, output a short summary of what you changed and why.\n")
+	return b.String()
 }
 
 // validationFor states how to confirm an item's change is behavior-preserving.
