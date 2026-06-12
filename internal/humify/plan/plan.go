@@ -67,6 +67,14 @@ var templates = map[string]template{
 		benefit: "A smaller, honest file tree with zero behavior change if validation still passes.",
 		risk:    "low", safety: "safe",
 	},
+	"dead_module": {
+		title: "Quarantine unreferenced modules", action: "quarantine", applyable: true,
+		problem: "These source files are imported by no other module and are not entry points, so they look dead.",
+		why:     "Dead modules inflate the tree and rot silently — but only an empirical check proves a file is truly unused.",
+		change:  "Quarantine each candidate to .humify/delete-me/<plan-id>/ (reversible), re-run validation, and keep the move only if every previously-passing check still passes.",
+		benefit: "Genuinely-dead code is removed with proof; a wrong guess is caught by validation and rolled back, not shipped.",
+		risk:    "low", safety: "safe",
+	},
 	"swallowed_error": {
 		title:   "Stop swallowing errors",
 		problem: "Errors are caught and discarded, so real failures pass silently.",
@@ -136,10 +144,14 @@ var templates = map[string]template{
 // order ranks signals into tiers so safe quick wins (the reversible quarantine)
 // come first; everything else is ordered by severity weight within its tier.
 func order(signal string) int {
-	if signal == "stale_file" {
+	switch signal {
+	case "stale_file":
 		return 0
+	case "dead_module":
+		return 1
+	default:
+		return 2
 	}
-	return 1
 }
 
 // agentFileSizeLimit is the max LOC a file may have to be included in an agent
@@ -153,6 +165,7 @@ func Build(a analyze.Analysis) Plan {
 	for _, fs := range a.Files {
 		fileLOC[fs.Path] = fs.Metrics.LOC
 	}
+	deadFiles := deadCandidateFiles(a.Findings)
 	groups := groupBySignal(a.Findings)
 	items := make([]Item, 0, len(groups))
 	for signal, fs := range groups {
@@ -160,7 +173,7 @@ func Build(a analyze.Analysis) Plan {
 		if !ok {
 			continue
 		}
-		items = append(items, buildItem(signal, tpl, fs, fileLOC))
+		items = append(items, buildItem(signal, tpl, fs, fileLOC, deadFiles))
 	}
 	sortItems(items, a.Findings)
 	for i := range items {
@@ -178,8 +191,22 @@ func Build(a analyze.Analysis) Plan {
 	}
 }
 
+// deadCandidateFiles is the set of files nominated as dead_module candidates. A
+// refactor agent skips these — they are slated for a reversible quarantine — but
+// they stay in the analysis and the plan. Nothing is erased on an unconfirmed
+// heuristic; only apply's validation re-run ever decides a file is really gone.
+func deadCandidateFiles(findings []analyze.Finding) map[string]bool {
+	dead := map[string]bool{}
+	for _, f := range findings {
+		if f.Signal == "dead_module" {
+			dead[f.File] = true
+		}
+	}
+	return dead
+}
+
 // buildItem assembles one refactor item from a signal's findings.
-func buildItem(signal string, tpl template, fs []analyze.Finding, fileLOC map[string]int) Item {
+func buildItem(signal string, tpl template, fs []analyze.Finding, fileLOC map[string]int, deadFiles map[string]bool) Item {
 	item := Item{
 		Signal: signal, Title: tpl.title, Problem: tpl.problem, WhyItMatters: tpl.why,
 		RecommendedChange: tpl.change, ExpectedBenefit: tpl.benefit,
@@ -199,7 +226,7 @@ func buildItem(signal string, tpl template, fs []analyze.Finding, fileLOC map[st
 		}
 	}
 	sort.Strings(item.Files)
-	item.AgentSpec = buildAgentSpec(signal, tpl, item, fileLOC)
+	item.AgentSpec = buildAgentSpec(signal, tpl, item, fileLOC, deadFiles)
 	return item
 }
 
@@ -223,7 +250,7 @@ var signalInstructions = map[string]string{
 // transformation rule so the agent needs no additional context to act.
 // Files exceeding agentFileSizeLimit LOC are excluded with an explicit note so
 // the agent is not overwhelmed and the user knows they were skipped.
-func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]int) string {
+func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]int, deadFiles map[string]bool) string {
 	if tpl.safety == "safe" {
 		return "" // safe items use the quarantine path, not an agent
 	}
@@ -232,11 +259,14 @@ func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]i
 		instr = tpl.change
 	}
 
-	var within, tooLarge []string
+	var within, tooLarge, deadCand []string
 	for _, f := range item.Files {
-		if loc, known := fileLOC[f]; known && loc > agentFileSizeLimit {
-			tooLarge = append(tooLarge, fmt.Sprintf("%s (%d lines)", f, loc))
-		} else {
+		switch {
+		case deadFiles[f]:
+			deadCand = append(deadCand, f) // slated for dead_module quarantine; do not refactor
+		case fileLOC[f] > agentFileSizeLimit:
+			tooLarge = append(tooLarge, fmt.Sprintf("%s (%d lines)", f, fileLOC[f]))
+		default:
 			within = append(within, f)
 		}
 	}
@@ -251,6 +281,12 @@ func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]i
 	if len(tooLarge) > 0 {
 		b.WriteString("\nFiles excluded (too large for a single agent pass — address separately):\n")
 		for _, f := range tooLarge {
+			fmt.Fprintf(&b, "  - %s\n", f)
+		}
+	}
+	if len(deadCand) > 0 {
+		b.WriteString("\nFiles excluded (flagged as possibly-dead modules — resolve via the dead_module quarantine first; do not refactor):\n")
+		for _, f := range deadCand {
 			fmt.Fprintf(&b, "  - %s\n", f)
 		}
 	}

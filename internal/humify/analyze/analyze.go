@@ -28,9 +28,10 @@ const (
 // Config holds the tunable thresholds that turn metrics into findings. Defaults
 // are sensible for general repos; humify.config.json may override them.
 type Config struct {
-	MaxFileLines     int `json:"maxFileLines"`
-	MaxFunctionLines int `json:"maxFunctionLines"`
-	MaxNestingDepth  int `json:"maxNestingDepth"`
+	MaxFileLines     int      `json:"maxFileLines"`
+	MaxFunctionLines int      `json:"maxFunctionLines"`
+	MaxNestingDepth  int      `json:"maxNestingDepth"`
+	LiveModules      []string `json:"liveModules"` // paths/base names to never flag as dead modules (entry points loaded dynamically)
 }
 
 // Defaults returns Humify's built-in thresholds.
@@ -98,16 +99,16 @@ type Summary struct {
 
 // Analysis is the full read-only review of a repository.
 type Analysis struct {
-	Schema      int             `json:"schema"`
-	Tool        string          `json:"tool"`
-	Version     string          `json:"version"`
-	Target      string          `json:"target"`
-	GeneratedAt string          `json:"generated_at"`
-	Project     detect.Project  `json:"project"`
-	Scores      CategoryScores  `json:"scores"`
-	Files       []FileScore     `json:"files"`
-	Findings    []Finding       `json:"findings"`
-	Summary     Summary         `json:"summary"`
+	Schema      int            `json:"schema"`
+	Tool        string         `json:"tool"`
+	Version     string         `json:"version"`
+	Target      string         `json:"target"`
+	GeneratedAt string         `json:"generated_at"`
+	Project     detect.Project `json:"project"`
+	Scores      CategoryScores `json:"scores"`
+	Files       []FileScore    `json:"files"`
+	Findings    []Finding      `json:"findings"`
+	Summary     Summary        `json:"summary"`
 }
 
 // Run performs a full read-only analysis of the repository at root.
@@ -128,6 +129,7 @@ func Run(root string, cfg Config) (Analysis, error) {
 	}
 	a.Files, a.Findings = reviewFiles(res, cfg)
 	a.Findings = append(a.Findings, staleFindings(res)...)
+	a.Findings = append(a.Findings, deadModuleFindings(res, cfg)...)
 	assignIDs(a.Findings)
 	a.Scores = score(a.Files, a.Findings, a.Project)
 	a.Summary = summarize(a.Files, a.Findings)
@@ -176,7 +178,7 @@ func staleFindings(res scan.Result) []Finding {
 			out = append(out, Finding{
 				Category: "maintainability", Signal: "stale_file", File: f.Path, Line: 1,
 				Severity: "warning", Risk: "low", Evidence: reason,
-				Detail:   "This file looks throwaway or empty; quarantine it (reversibly) and re-run validation to confirm nothing depends on it.",
+				Detail: "This file looks throwaway or empty; quarantine it (reversibly) and re-run validation to confirm nothing depends on it.",
 			})
 		}
 	}

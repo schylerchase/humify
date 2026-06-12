@@ -185,10 +185,22 @@ func plannedMoves(root string, item plan.Item) []FileMove {
 		dst := filepath.Join(state.QuarantineDir(root, item.ID), filepath.FromSlash(rel))
 		moves = append(moves, FileMove{
 			Original: src, New: dst,
-			Reason: "stale file (quarantined by " + item.ID + ")",
+			Reason: quarantineReason(item),
 		})
 	}
 	return moves
+}
+
+// quarantineReason names why a file was quarantined, for the reversible manifest.
+func quarantineReason(item plan.Item) string {
+	what := "file"
+	switch item.Signal {
+	case "stale_file":
+		what = "stale file"
+	case "dead_module":
+		what = "unreferenced module"
+	}
+	return fmt.Sprintf("%s (quarantined by %s)", what, item.ID)
 }
 
 // move relocates each file into quarantine (paths are absolute), returning the

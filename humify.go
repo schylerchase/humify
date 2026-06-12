@@ -205,9 +205,10 @@ func loadOrAnalyze(root string, opts options) (analyze.Analysis, error) {
 
 // fileConfig is the subset of humify.config.json Humify reads today.
 type fileConfig struct {
-	MaxFileLines     int `json:"maxFileLines"`
-	MaxFunctionLines int `json:"maxFunctionLines"`
-	MaxNestingDepth  int `json:"maxNestingDepth"`
+	MaxFileLines     int      `json:"maxFileLines"`
+	MaxFunctionLines int      `json:"maxFunctionLines"`
+	MaxNestingDepth  int      `json:"maxNestingDepth"`
+	LiveModules      []string `json:"liveModules"`
 }
 
 // loadConfig reads thresholds from humify.config.json (explicit --config or the
@@ -229,6 +230,7 @@ func loadConfig(root string, opts options) analyze.Config {
 		MaxFileLines:     fc.MaxFileLines,
 		MaxFunctionLines: fc.MaxFunctionLines,
 		MaxNestingDepth:  fc.MaxNestingDepth,
+		LiveModules:      fc.LiveModules,
 	}
 }
 
