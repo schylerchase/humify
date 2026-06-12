@@ -22,7 +22,7 @@ import (
 // Tool and Version identify the producer in every Analysis.
 const (
 	Tool    = "humify"
-	Version = "0.2.0"
+	Version = "0.3.0"
 )
 
 // Config holds the tunable thresholds that turn metrics into findings. Defaults
