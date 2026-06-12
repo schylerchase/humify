@@ -2,6 +2,20 @@ package verify
 
 import "testing"
 
+func TestParseGoProfile(t *testing.T) {
+	profile := "mode: set\n" +
+		"github.com/me/proj/pkg/a.go:3.10,5.2 1 1\n" +
+		"github.com/me/proj/pkg/a.go:6.2,6.20 1 0\n" +
+		"github.com/me/proj/pkg/b.go:7.10,9.2 1 0\n"
+	files := parseGoProfile(profile, "github.com/me/proj")
+	if !files["pkg/a.go"].Covered {
+		t.Errorf("a.go has a hit block (count 1) -> must be Covered; got %+v", files["pkg/a.go"])
+	}
+	if files["pkg/b.go"].Covered {
+		t.Errorf("b.go has only a zero-count block -> must NOT be Covered; got %+v", files["pkg/b.go"])
+	}
+}
+
 func report(measured bool, files map[string]FileCoverage) CoverageReport {
 	return CoverageReport{Schema: 1, Measured: measured, Files: files}
 }
