@@ -50,16 +50,7 @@ func cmdPlan(opts options) int {
 		return fail(opts, "analyze_error", exitError, err.Error())
 	}
 	p := hplan.Build(a)
-	var cov verify.CoverageReport
-	if hstate.Load(root, hstate.CoverageFile, &cov) == nil {
-		for i := range p.Items {
-			if !p.Items[i].Applyable {
-				continue
-			}
-			v := cov.WorstVerdict(p.Items[i].Files)
-			p.Items[i].Verification = string(v)
-		}
-	}
+	stampVerification(root, opts, &p)
 	if err := hstate.Save(root, hstate.PlanFile, p); err != nil {
 		return fail(opts, "write_error", exitError, "could not write plan: "+err.Error())
 	}
@@ -72,6 +63,34 @@ func cmdPlan(opts options) int {
 	}
 	printPlan(p)
 	return exitOK
+}
+
+// stampVerification stamps each applyable plan item with its coverage verdict.
+// Coverage is produced here if it has not been already, so the verdict appears in
+// the documented analyze->plan order and not only after a separate `verify`. The
+// --no-coverage flag opts out (items then carry no verdict). A measured report with
+// no execution yields "build-only"; an unmeasured report yields "unmeasured" — the
+// verdict is never silently empty.
+func stampVerification(root string, opts options, p *hplan.Plan) {
+	if opts.noCoverage {
+		return
+	}
+	var cov verify.CoverageReport
+	if hstate.Load(root, hstate.CoverageFile, &cov) != nil {
+		cov = verify.Coverage(root)
+		_ = hstate.Save(root, hstate.CoverageFile, cov)
+	}
+	stampFromCoverage(p, cov)
+}
+
+// stampFromCoverage sets the Verification verdict on every applyable item from a
+// coverage report. Pure (no I/O) so it is unit-testable.
+func stampFromCoverage(p *hplan.Plan, cov verify.CoverageReport) {
+	for i := range p.Items {
+		if p.Items[i].Applyable {
+			p.Items[i].Verification = string(cov.WorstVerdict(p.Items[i].Files))
+		}
+	}
 }
 
 // cmdVerify runs the project's detected validation commands.

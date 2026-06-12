@@ -56,7 +56,7 @@ func (r CoverageReport) VerdictFor(file string) Verdict {
 // unmeasured, Unmeasured; else BuildOnly if ANY file is uncovered, else
 // BehaviorVerified. An item is only as trustworthy as its weakest file.
 func (r CoverageReport) WorstVerdict(files []string) Verdict {
-	if !r.Measured {
+	if !r.Measured || len(files) == 0 {
 		return VerdictUnmeasured
 	}
 	worst := VerdictBehaviorVerified
@@ -151,7 +151,12 @@ func (goProvider) Name() string            { return "go" }
 func (goProvider) Detect(root string) bool { return exists(filepath.Join(root, "go.mod")) }
 
 func (goProvider) Run(root string) (CoverageReport, error) {
-	prof := filepath.Join(root, ".humify-cover.out")
+	tmp, err := os.CreateTemp("", "humify-cover-*.out")
+	if err != nil {
+		return CoverageReport{}, err
+	}
+	prof := tmp.Name()
+	tmp.Close()
 	defer os.Remove(prof)
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()

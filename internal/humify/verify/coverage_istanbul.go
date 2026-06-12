@@ -12,7 +12,7 @@ import (
 )
 
 // istanbulFile is the subset of an Istanbul coverage-final.json entry we read
-// (c8/nyc --reporter=json output).
+// (c8 --reporter=json output).
 type istanbulFile struct {
 	Path         string `json:"path"`
 	StatementMap map[string]struct {
@@ -46,7 +46,10 @@ func (jsProvider) Run(root string) (CoverageReport, error) {
 	if real, err := filepath.EvalSymlinks(root); err == nil {
 		root = real
 	}
-	covDir := filepath.Join(root, ".humify-cov")
+	covDir, err := os.MkdirTemp("", "humify-cov-*")
+	if err != nil {
+		return CoverageReport{}, err
+	}
 	defer os.RemoveAll(covDir)
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
 	defer cancel()

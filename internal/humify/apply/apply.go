@@ -147,6 +147,8 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 		len(moves), relQuarantine(item.ID), applyValidationNote(baseline, post))
 	if item.Verification == "build-only" {
 		msg += " (build-only: no test exercised this file)"
+	} else if item.Verification == "unmeasured" {
+		msg += " (unmeasured: no coverage tooling ran)"
 	}
 	res.Message = msg
 	return res, nil
