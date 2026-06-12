@@ -50,6 +50,16 @@ func cmdPlan(opts options) int {
 		return fail(opts, "analyze_error", exitError, err.Error())
 	}
 	p := hplan.Build(a)
+	var cov verify.CoverageReport
+	if hstate.Load(root, hstate.CoverageFile, &cov) == nil {
+		for i := range p.Items {
+			if !p.Items[i].Applyable {
+				continue
+			}
+			v := cov.WorstVerdict(p.Items[i].Files)
+			p.Items[i].Verification = string(v)
+		}
+	}
 	if err := hstate.Save(root, hstate.PlanFile, p); err != nil {
 		return fail(opts, "write_error", exitError, "could not write plan: "+err.Error())
 	}

@@ -86,6 +86,9 @@ func printPlan(p hplan.Plan) {
 		}
 		fmt.Printf("  %s  %-30s [%s] — %d file(s), %d finding(s)\n",
 			it.ID, it.Title, tag, len(it.Files), len(it.FindingIDs))
+		if it.Applyable && it.Verification != "" {
+			fmt.Printf("    verification: %s\n", it.Verification)
+		}
 	}
 	if firstApplyable != "" {
 		fmt.Printf("\nnext: humify apply --target %s --dry-run\n", firstApplyable)

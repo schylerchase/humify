@@ -52,6 +52,22 @@ func (r CoverageReport) VerdictFor(file string) Verdict {
 	return VerdictBuildOnly
 }
 
+// WorstVerdict returns the least-verified verdict across files: if the report is
+// unmeasured, Unmeasured; else BuildOnly if ANY file is uncovered, else
+// BehaviorVerified. An item is only as trustworthy as its weakest file.
+func (r CoverageReport) WorstVerdict(files []string) Verdict {
+	if !r.Measured {
+		return VerdictUnmeasured
+	}
+	worst := VerdictBehaviorVerified
+	for _, f := range files {
+		if r.VerdictFor(f) == VerdictBuildOnly {
+			worst = VerdictBuildOnly
+		}
+	}
+	return worst
+}
+
 // parseGoProfile turns a `go test -coverprofile` body into per-file coverage,
 // keyed by repo-relative path (modulePath stripped). A file is Covered iff any
 // block executed (trailing count > 0).

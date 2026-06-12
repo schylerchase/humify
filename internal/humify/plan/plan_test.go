@@ -115,6 +115,13 @@ func contains(xs []string, want string) bool {
 	return false
 }
 
+func TestItemCarriesVerification(t *testing.T) {
+	it := Item{ID: "HMF-001", Signal: "dead_module", Verification: "build-only"}
+	if it.Verification != "build-only" {
+		t.Fatalf("Item must carry a Verification verdict; got %q", it.Verification)
+	}
+}
+
 func findSignal(p Plan, signal string) (Item, bool) {
 	for _, it := range p.Items {
 		if it.Signal == signal {

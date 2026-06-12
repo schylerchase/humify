@@ -30,6 +30,7 @@ type Item struct {
 	Action             string   `json:"action"`     // machine hint for apply: "quarantine" or ""
 	AgentSpec          string   `json:"agent_spec"` // structured prompt for --unsafe-permission agent execution
 	Applyable          bool     `json:"applyable"`
+	Verification       string   `json:"verification,omitempty"` // behavior-verified|build-only|unmeasured (applyable items)
 	Files              []string `json:"files"`
 	FindingIDs         []string `json:"finding_ids"`
 	Evidence           []string `json:"evidence"`
