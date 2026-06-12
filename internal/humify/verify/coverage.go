@@ -125,7 +125,7 @@ type Provider interface {
 }
 
 // providers is the ordered registry. The first whose Detect matches wins.
-var providers = []Provider{goProvider{}}
+var providers = []Provider{goProvider{}, jsProvider{}}
 
 // Coverage produces a coverage report for root by running the first matching
 // provider's instrumented test suite. When no provider matches (or it errors), it
