@@ -84,6 +84,9 @@ func run(args []string) int {
 		return cmdDoctor(opts)
 	case "untangle":
 		return runUntangle(opts)
+	case "version":
+		fmt.Printf("humify %s\n", Version)
+		return exitOK
 	case "", "help", "-h", "--help":
 		printUsage()
 		return exitOK
@@ -209,6 +212,12 @@ func parseArgs(args []string) (string, options) {
 			// Help request; routed to printUsage via the empty/help command path.
 			if cmd == "" {
 				cmd = "help"
+			}
+		case a == "--version":
+			// Version request; routed to the version command so it is not caught
+			// below as an unknown flag.
+			if cmd == "" {
+				cmd = "version"
 			}
 		case strings.HasPrefix(a, "-"):
 			// Unrecognized flag. Record the first one so run() can fail loudly
@@ -349,6 +358,7 @@ usage:
   humify apply   --target HMF-### [--dry-run | --yes] [PATH]
   humify apply   --target HMF-### --unsafe-permission --agent-cmd=CMD [--yes] [PATH]
   humify untangle <stage> ...        (the massive-codebase workflow; see: humify untangle help)
+  humify version                     (print the humify version)
 
 PATH defaults to the current directory. Output JSON state is written under .humify/.
 

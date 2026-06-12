@@ -38,3 +38,15 @@ func TestStampFromCoverage(t *testing.T) {
 		t.Errorf("unmeasured report -> unmeasured verdict, got %q", un.Items[0].Verification)
 	}
 }
+
+func TestVersionRouting(t *testing.T) {
+	for _, in := range [][]string{{"version"}, {"--version"}} {
+		if cmd, _ := parseArgs(in); cmd != "version" {
+			t.Errorf("parseArgs(%v) cmd = %q, want version", in, cmd)
+		}
+	}
+	// --version must route to the version command, never the unknown-flag error.
+	if _, opts := parseArgs([]string{"--version"}); opts.unknownFlag != "" {
+		t.Errorf("--version must not be treated as an unknown flag, got %q", opts.unknownFlag)
+	}
+}
