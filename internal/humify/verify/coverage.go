@@ -2,8 +2,14 @@ package verify
 
 import (
 	"bufio"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/schylerryan/humify/internal/humify/state"
 )
 
 // FileCoverage records whether a file was executed by the test suite and which
@@ -92,4 +98,72 @@ func leadingLine(rng string) int {
 	}
 	n, _ := strconv.Atoi(rng[:dot])
 	return n
+}
+
+// Provider runs a language's test suite under coverage and reports per-file
+// coverage. A provider is used only when Detect is true for the repo.
+type Provider interface {
+	Name() string
+	Detect(root string) bool
+	Run(root string) (CoverageReport, error)
+}
+
+// providers is the ordered registry. The first whose Detect matches wins.
+var providers = []Provider{goProvider{}}
+
+// Coverage produces a coverage report for root by running the first matching
+// provider's instrumented test suite. When no provider matches (or it errors), it
+// returns an unmeasured report — Measured:false is the honest "couldn't measure"
+// signal, never an error the caller must handle to stay truthful.
+func Coverage(root string) CoverageReport {
+	for _, p := range providers {
+		if !p.Detect(root) {
+			continue
+		}
+		rep, err := p.Run(root)
+		if err != nil {
+			return CoverageReport{Schema: state.Schema, Tool: p.Name(), Measured: false, Files: map[string]FileCoverage{}}
+		}
+		return rep
+	}
+	return CoverageReport{Schema: state.Schema, Measured: false, Files: map[string]FileCoverage{}}
+}
+
+type goProvider struct{}
+
+func (goProvider) Name() string            { return "go" }
+func (goProvider) Detect(root string) bool { return exists(filepath.Join(root, "go.mod")) }
+
+func (goProvider) Run(root string) (CoverageReport, error) {
+	prof := filepath.Join(root, ".humify-cover.out")
+	defer os.Remove(prof)
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "test", "-coverprofile="+prof, "./...")
+	cmd.Dir = root
+	_ = cmd.Run() // a failing/empty test suite still yields a (partial) profile
+	data, err := os.ReadFile(prof)
+	if err != nil {
+		return CoverageReport{}, err
+	}
+	return CoverageReport{
+		Schema:   state.Schema,
+		Tool:     "go",
+		Measured: true,
+		Files:    parseGoProfile(string(data), goModulePath(root)),
+	}, nil
+}
+
+// goModulePath reads the module path from go.mod, or "" if unreadable.
+func goModulePath(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }
