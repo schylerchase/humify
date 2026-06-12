@@ -74,6 +74,10 @@ func cmdVerify(opts options) int {
 	if err := hstate.Save(root, hstate.ValidationFile, v); err != nil {
 		return fail(opts, "write_error", exitError, "could not write validation: "+err.Error())
 	}
+	if !opts.noCoverage {
+		cov := verify.Coverage(root)
+		_ = hstate.Save(root, hstate.CoverageFile, cov)
+	}
 	if opts.json {
 		emitJSON(v)
 	} else {

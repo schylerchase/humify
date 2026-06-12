@@ -53,6 +53,7 @@ type options struct {
 	markdown         bool // product commands: also write the optional markdown report
 	execute          bool // untangle run: opt in to the source-modifying execute stage
 	unsafePermission bool // apply: unlock autonomous agent execution for manual/assisted items
+	noCoverage       bool // verify: skip coverage instrumentation
 }
 
 const defaultGodLOC = 1500
@@ -172,6 +173,8 @@ func parseArgs(args []string) (string, options) {
 			opts.execute = true
 		case a == "--unsafe-permission":
 			opts.unsafePermission = true
+		case a == "--no-coverage":
+			opts.noCoverage = true
 		case name == "--path":
 			opts.path = value()
 		case name == "--root":

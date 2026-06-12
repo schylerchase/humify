@@ -20,6 +20,7 @@ const (
 	AnalysisFile   = "analysis.json"
 	PlanFile       = "plan.json"
 	ValidationFile = "validation.json"
+	CoverageFile   = "coverage.json"
 	// DeleteMeDir holds files apply has quarantined, namespaced per plan item.
 	DeleteMeDir = "delete-me"
 )
