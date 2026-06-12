@@ -47,13 +47,10 @@ func TestVerdictFor(t *testing.T) {
 	}
 }
 
-func TestGoProviderRun(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs the go toolchain")
-	}
-	if _, err := exec.LookPath("go"); err != nil {
-		t.Skip("go toolchain not available")
-	}
+// newCovDemoModule writes a throwaway Go module whose covered.go is exercised by a
+// test and whose uncovered.go is compiled but never run, for coverage verdict tests.
+func newCovDemoModule(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	write := func(rel, body string) {
 		abs := filepath.Join(root, rel)
@@ -68,7 +65,17 @@ func TestGoProviderRun(t *testing.T) {
 	write("covered.go", "package covdemo\n\nfunc Used() int { return 1 }\n")
 	write("uncovered.go", "package covdemo\n\nfunc Unused() int { return 2 }\n")
 	write("covered_test.go", "package covdemo\n\nimport \"testing\"\n\nfunc TestUsed(t *testing.T){ if Used()!=1 {t.Fail()} }\n")
+	return root
+}
 
+func TestGoProviderRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the go toolchain")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	root := newCovDemoModule(t)
 	p := goProvider{}
 	if !p.Detect(root) {
 		t.Fatal("goProvider must Detect a go.mod project")
@@ -85,5 +92,22 @@ func TestGoProviderRun(t *testing.T) {
 	}
 	if rep.Files["uncovered.go"].Covered {
 		t.Error("uncovered.go is compiled but never run by a test -> must be build-only (not Covered)")
+	}
+}
+
+func TestCoverageVerdictEndToEndGo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("runs the go toolchain")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	root := newCovDemoModule(t)
+	rep := Coverage(root)
+	if rep.VerdictFor("covered.go") != VerdictBehaviorVerified {
+		t.Errorf("covered.go should be behavior-verified, got %q", rep.VerdictFor("covered.go"))
+	}
+	if rep.VerdictFor("uncovered.go") != VerdictBuildOnly {
+		t.Errorf("uncovered.go should be build-only, got %q", rep.VerdictFor("uncovered.go"))
 	}
 }
