@@ -32,12 +32,13 @@ type FileMove struct {
 
 // Manifest is the reversible record written into a quarantine directory.
 type Manifest struct {
-	Schema     int        `json:"schema"`
-	Tool       string     `json:"tool"`
-	PlanItem   string     `json:"plan_item"`
-	Timestamp  string     `json:"timestamp"`
-	Validation ValSummary `json:"validation"`
-	Files      []FileMove `json:"files"`
+	Schema       int        `json:"schema"`
+	Tool         string     `json:"tool"`
+	PlanItem     string     `json:"plan_item"`
+	Timestamp    string     `json:"timestamp"`
+	Verification string     `json:"verification,omitempty"`
+	Validation   ValSummary `json:"validation"`
+	Files        []FileMove `json:"files"`
 }
 
 // ValSummary is the apply-time validation outcome stored with a quarantine.
@@ -64,6 +65,7 @@ type Result struct {
 	Moves        []FileMove         `json:"moves"`
 	Validation   *verify.Validation `json:"validation,omitempty"`
 	ManifestPath string             `json:"manifest_path,omitempty"`
+	Verification string             `json:"verification,omitempty"`
 	Message      string             `json:"message"`
 }
 
@@ -105,7 +107,9 @@ func Apply(root string, p plan.Plan, itemID string, dryRun, yes bool, agentCmd s
 			len(moves), relQuarantine(item.ID), item.ID)
 		return res, nil
 	}
-	return performQuarantine(root, item, moves, now)
+	res2, err := performQuarantine(root, item, moves, now)
+	res2.Verification = item.Verification
+	return res2, err
 }
 
 // performQuarantine moves the files (absolute paths), verifies, and rolls back on
@@ -139,8 +143,12 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 	}
 	res.Applied = true
 	res.ManifestPath = manifestPath
-	res.Message = fmt.Sprintf("Quarantined %d file(s) into %s. %s Restore by moving files back from that directory.",
+	msg := fmt.Sprintf("Quarantined %d file(s) into %s. %s Restore by moving files back from that directory.",
 		len(moves), relQuarantine(item.ID), applyValidationNote(baseline, post))
+	if item.Verification == "build-only" {
+		msg += " (build-only: no test exercised this file)"
+	}
+	res.Message = msg
 	return res, nil
 }
 
@@ -232,7 +240,8 @@ func writeManifest(root string, item plan.Item, moves []FileMove, baseline, post
 	already, newly, fixed := computeDelta(baseline, post)
 	man := Manifest{
 		Schema: state.Schema, Tool: "humify", PlanItem: item.ID,
-		Timestamp: post.GeneratedAt,
+		Timestamp:    post.GeneratedAt,
+		Verification: item.Verification,
 		Validation: ValSummary{
 			Ran: post.Validated, Passed: post.Validated && post.Passed,
 			AlreadyFailing: already, NewlyFailing: newly, Fixed: fixed,

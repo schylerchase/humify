@@ -264,6 +264,23 @@ func TestApplyValidationNote(t *testing.T) {
 	}
 }
 
+func TestApplyRecordsVerificationVerdict(t *testing.T) {
+	root, p := buildRepo(t)
+	// Stamp the verdict on the actual plan item apply will use.
+	for i := range p.Items {
+		if p.Items[i].ID == "HMF-001" {
+			p.Items[i].Verification = "build-only"
+		}
+	}
+	res, err := Apply(root, p, "HMF-001", false, true, "", false, time.Now())
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if res.Verification != "build-only" {
+		t.Errorf("Result must carry the item's verdict; got %q", res.Verification)
+	}
+}
+
 func findSignal(p plan.Plan, signal string) (plan.Item, bool) {
 	for _, it := range p.Items {
 		if it.Signal == signal {
