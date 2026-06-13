@@ -41,6 +41,10 @@ humify apply --target HMF-001 --yes
 humify verify
 ```
 
+## Sequencing a cleanup session
+
+Humify *ranks* items but does not *sequence* them. To turn the plan into a single next move (do-this-first, the prize, where to stop), see [docs/rank-then-judge.md](docs/rank-then-judge.md) — a reusable prompt pattern, not a command. The sequencing is judgment; humify's verdicts remain the verified facts.
+
 ## What `analyze` looks for
 
 - **Structure:** giant files, long functions, deep nesting (thresholds tunable via `humify.config.json`: `maxFileLines`, `maxFunctionLines`, `maxNestingDepth`).
