@@ -33,9 +33,6 @@ func big(a int) int {
 	if m.MaxNesting < 4 {
 		t.Errorf("MaxNesting = %d, want >= 4", m.MaxNesting)
 	}
-	if m.Comment < 1 {
-		t.Error("header comment should be counted")
-	}
 }
 
 func TestMeasureIgnoresBracesInStringsAndComments(t *testing.T) {
@@ -333,7 +330,7 @@ func TestVagueNameSkipsIdiomaticResultAndItem(t *testing.T) {
 
 func inspectSrc(path, lang, src string) []Finding {
 	infos := scanLines(src, lang)
-	return inspect(path, lang, infos, splitLines(src), measureFrom(src, infos, lang), Defaults())
+	return inspect(path, lang, infos, splitLines(src), measureFrom(infos, lang), Defaults())
 }
 
 func TestMinifiedFileNotReviewed(t *testing.T) {

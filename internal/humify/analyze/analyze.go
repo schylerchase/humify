@@ -151,7 +151,7 @@ func reviewFiles(res scan.Result, cfg Config) ([]FileScore, []Finding) {
 		}
 		text := string(content)
 		infos := scanLines(text, f.Lang)
-		m := measureFrom(text, infos, f.Lang)
+		m := measureFrom(infos, f.Lang)
 		fileFindings := inspect(f.Path, f.Lang, infos, splitLines(text), m, cfg)
 		findings = append(findings, fileFindings...)
 		files = append(files, FileScore{

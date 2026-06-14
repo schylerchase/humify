@@ -6,20 +6,16 @@ import (
 )
 
 // Metrics are the structural facts measured from one source file's text. They are
-// heuristic and language-shallow — enough to flag giant functions, deep nesting,
-// and comment density without parsing every language — but they are computed over
-// code with strings and comments removed, so braces and indentation inside string
-// literals or comments never skew them.
+// heuristic and language-shallow — enough to flag giant functions and deep nesting
+// without parsing every language — but they are computed over code with strings and
+// comments removed, so braces and indentation inside string literals or comments
+// never skew them.
 type Metrics struct {
-	LOC          int     `json:"loc"`
-	Code         int     `json:"code"`
-	Comment      int     `json:"comment"`
-	Blank        int     `json:"blank"`
-	CommentRatio float64 `json:"comment_ratio"`
-	LongestFunc  int     `json:"longest_func"` // lines in the longest function-like body
-	LongestLine  int     `json:"longest_line"` // 1-based start line of that body
-	MaxNesting   int     `json:"max_nesting"`  // deepest block nesting
-	DeepestLine  int     `json:"deepest_line"` // 1-based line at the deepest nesting
+	LOC         int `json:"loc"`
+	LongestFunc int `json:"longest_func"` // lines in the longest function-like body
+	LongestLine int `json:"longest_line"` // 1-based start line of that body
+	MaxNesting  int `json:"max_nesting"`  // deepest block nesting
+	DeepestLine int `json:"deepest_line"` // 1-based line at the deepest nesting
 }
 
 // family groups languages by how their structure is measured.
@@ -52,22 +48,18 @@ type lineInfo struct {
 
 // Measure computes metrics for a file's text in the given language.
 func Measure(content, lang string) Metrics {
-	return measureFrom(content, scanLines(content, lang), lang)
+	return measureFrom(scanLines(content, lang), lang)
 }
 
 // measureFrom computes metrics from a pre-scanned file (so callers that already
 // scanned — e.g. the slop pass — do not scan twice).
-func measureFrom(content string, infos []lineInfo, lang string) Metrics {
+func measureFrom(infos []lineInfo, lang string) Metrics {
 	m := Metrics{LOC: len(infos)}
-	countKinds(content, infos, &m)
 	code := codeOf(infos)
 	if family(lang) == "indent" {
 		m.LongestFunc, m.LongestLine, m.MaxNesting, m.DeepestLine = indentSpans(code)
 	} else {
 		m.LongestFunc, m.LongestLine, m.MaxNesting, m.DeepestLine = braceSpans(code)
-	}
-	if m.LOC > 0 {
-		m.CommentRatio = float64(m.Comment) / float64(m.LOC)
 	}
 	return m
 }
@@ -79,24 +71,6 @@ func codeOf(infos []lineInfo) []string {
 		out[i] = in.code
 	}
 	return out
-}
-
-// countKinds tallies blank, comment, and code lines. A line inside a multi-line
-// string counts as code (it is part of a code statement), not a comment.
-func countKinds(content string, infos []lineInfo, m *Metrics) {
-	raw := splitLines(content)
-	for i, in := range infos {
-		switch {
-		case i < len(raw) && strings.TrimSpace(raw[i]) == "":
-			m.Blank++
-		case strings.TrimSpace(in.code) != "":
-			m.Code++
-		case in.comment != "":
-			m.Comment++
-		default:
-			m.Code++
-		}
-	}
 }
 
 // scanLines dispatches to the language-family scanner.
