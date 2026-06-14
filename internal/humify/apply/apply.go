@@ -122,7 +122,9 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 	baseline, _ := verify.Run(root, now)
 	done, err := move(moves)
 	if err != nil {
-		restore(done)
+		if rerr := restore(done); rerr != nil {
+			return res, fmt.Errorf("quarantine aborted AND rollback failed: %v; original error: %w", rerr, err)
+		}
 		return res, fmt.Errorf("quarantine aborted and rolled back: %w", err)
 	}
 	post, _ := verify.Run(root, now)
@@ -130,7 +132,11 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 	res.Validated = post.Validated
 
 	if outcome, kinds := gate(baseline, post); outcome != gateOK {
-		restore(moves)
+		if rerr := restore(moves); rerr != nil {
+			res.RolledBack = false
+			res.Message = "Rollback FAILED after " + rollbackReason(outcome, kinds) + ": " + rerr.Error() + " — move the stranded file(s) back from " + relQuarantine(item.ID) + " by hand before retrying."
+			return res, fmt.Errorf("rollback failed: %v", rerr)
+		}
 		res.RolledBack = true
 		res.Message = "Rolled back the quarantine: " + rollbackReason(outcome, kinds) + ". No files were moved; investigate before retrying."
 		return res, nil
@@ -138,7 +144,9 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 
 	manifestPath, err := writeManifest(root, item, moves, baseline, post)
 	if err != nil {
-		restore(moves)
+		if rerr := restore(moves); rerr != nil {
+			return res, fmt.Errorf("could not write manifest (%v) AND rollback failed: %v — file(s) stranded in %s", err, rerr, relQuarantine(item.ID))
+		}
 		return res, fmt.Errorf("quarantine rolled back: could not write manifest: %w", err)
 	}
 	res.Applied = true
@@ -214,12 +222,17 @@ func quarantineReason(item plan.Item) string {
 }
 
 // move relocates each file into quarantine (paths are absolute), returning the
-// moves it completed so a failure can be rolled back.
+// moves it completed so a failure can be rolled back. It refuses to overwrite an
+// existing destination: a bare os.Rename would silently clobber a quarantined copy
+// left by a prior run, destroying the only reversible record.
 func move(moves []FileMove) ([]FileMove, error) {
 	var done []FileMove
 	for _, m := range moves {
 		if err := os.MkdirAll(filepath.Dir(m.New), 0o755); err != nil {
 			return done, err
+		}
+		if _, err := os.Lstat(m.New); err == nil {
+			return done, fmt.Errorf("quarantine destination already exists: %s — a prior quarantined copy would be overwritten; resolve it before retrying", m.New)
 		}
 		if err := os.Rename(m.Original, m.New); err != nil {
 			return done, err
@@ -229,12 +242,30 @@ func move(moves []FileMove) ([]FileMove, error) {
 	return done, nil
 }
 
-// restore moves quarantined files back to their original locations (best effort).
-func restore(moves []FileMove) {
+// restore moves quarantined files back to their original locations, returning an
+// error that names every file it could not return. It will not overwrite a file
+// that reappeared at the original path, and it leaves the quarantined copy on disk
+// when a move-back fails — so a stranded file is reported, never silently lost.
+func restore(moves []FileMove) error {
+	var stranded []string
 	for _, m := range moves {
-		_ = os.MkdirAll(filepath.Dir(m.Original), 0o755)
-		_ = os.Rename(m.New, m.Original)
+		if _, err := os.Lstat(m.Original); err == nil {
+			stranded = append(stranded, fmt.Sprintf("%s (original path reappeared; copy kept at %s)", m.Original, m.New))
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(m.Original), 0o755); err != nil {
+			stranded = append(stranded, fmt.Sprintf("%s: %v (copy kept at %s)", m.Original, err, m.New))
+			continue
+		}
+		if err := os.Rename(m.New, m.Original); err != nil {
+			stranded = append(stranded, fmt.Sprintf("%s: %v (copy kept at %s)", m.Original, err, m.New))
+			continue
+		}
 	}
+	if len(stranded) > 0 {
+		return fmt.Errorf("restore incomplete — %s", strings.Join(stranded, "; "))
+	}
+	return nil
 }
 
 // writeManifest records the quarantine so it is auditable and reversible.

@@ -281,6 +281,57 @@ func TestApplyRecordsVerificationVerdict(t *testing.T) {
 	}
 }
 
+// TestMoveRefusesToOverwriteExistingQuarantine guards bug #6A: move used a bare
+// os.Rename, which on Unix silently overwrites an existing destination — so a
+// second apply at the same item id would destroy the only reversible copy from a
+// prior run. The fix refuses rather than clobber.
+func TestMoveRefusesToOverwriteExistingQuarantine(t *testing.T) {
+	root, p := buildRepo(t)
+	// Pre-seed the destination with sentinel contents, as if a prior apply already
+	// quarantined here.
+	qdir := filepath.Join(root, ".humify", "delete-me", "HMF-001")
+	writeFile(t, qdir, "old.bak", "SENTINEL-prior-copy\n")
+
+	_, err := Apply(root, p, "HMF-001", false, true, "", false, time.Now())
+	if err == nil {
+		t.Fatal("apply must refuse when the quarantine destination already exists, not overwrite it")
+	}
+	if data, _ := os.ReadFile(filepath.Join(qdir, "old.bak")); string(data) != "SENTINEL-prior-copy\n" {
+		t.Errorf("pre-existing quarantined copy was clobbered: %q", data)
+	}
+	if !isFile(filepath.Join(root, "old.bak")) {
+		t.Error("source must remain in place when apply refuses to overwrite quarantine")
+	}
+}
+
+// TestRestoreReportsFailureInsteadOfSilentSuccess guards bug #6B: restore swallowed
+// every os.Rename error, so a rollback that left a file stranded still reported a
+// clean tree. The fix makes restore return an error naming the stranded file and
+// leaves the quarantined copy on disk rather than losing it.
+func TestRestoreReportsFailureInsteadOfSilentSuccess(t *testing.T) {
+	root := t.TempDir()
+	// A completed move whose original path is now BLOCKED by a directory, so the
+	// rename-back cannot succeed.
+	orig := filepath.Join(root, "blocked.txt")
+	if err := os.MkdirAll(orig, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	qdir := filepath.Join(root, ".humify", "delete-me", "HMF-001")
+	writeFile(t, qdir, "blocked.txt", "quarantined-body\n")
+	q := filepath.Join(qdir, "blocked.txt")
+
+	err := restore([]FileMove{{Original: orig, New: q}})
+	if err == nil {
+		t.Fatal("restore must return an error when it cannot return a file, not swallow it")
+	}
+	if !strings.Contains(err.Error(), "blocked.txt") {
+		t.Errorf("restore error should name the stranded file: %v", err)
+	}
+	if !isFile(q) {
+		t.Error("the quarantined copy must be left on disk when restore fails, never lost")
+	}
+}
+
 func findSignal(p plan.Plan, signal string) (plan.Item, bool) {
 	for _, it := range p.Items {
 		if it.Signal == signal {
