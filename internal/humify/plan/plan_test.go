@@ -162,6 +162,53 @@ func TestAgentSpecEvidenceMatchesWorklist(t *testing.T) {
 	}
 }
 
+// TestBuildAgentSpecSizeCapAndSafeShortCircuit covers ROADMAP #12: a file over
+// agentFileSizeLimit must be excluded from the modify list (named in the too-large
+// section with its LOC, not silently dropped), and a safe signal must produce no
+// agent spec (it uses the quarantine path).
+func TestBuildAgentSpecSizeCapAndSafeShortCircuit(t *testing.T) {
+	a := analyze.Analysis{
+		Target: "/repo",
+		Files: []analyze.FileScore{
+			{Path: "huge.go", Metrics: analyze.Metrics{LOC: agentFileSizeLimit + 1000}},
+			{Path: "small.go", Metrics: analyze.Metrics{LOC: 50}},
+		},
+		Findings: []analyze.Finding{
+			{ID: "F001", Category: "maintainability", Signal: "long_function", File: "huge.go", Line: 10, Severity: "major", Evidence: "huge"},
+			{ID: "F002", Category: "maintainability", Signal: "long_function", File: "small.go", Line: 5, Severity: "major", Evidence: "small"},
+			{ID: "F003", Category: "maintainability", Signal: "stale_file", File: "old.bak", Line: 1, Severity: "warning", Evidence: "stale"},
+		},
+	}
+	p := Build(a)
+
+	lf, ok := findSignal(p, "long_function")
+	if !ok {
+		t.Fatal("expected a long_function item")
+	}
+	idx := strings.Index(lf.AgentSpec, "Files excluded (too large")
+	if idx < 0 {
+		t.Fatalf("spec must carry a too-large excluded section:\n%s", lf.AgentSpec)
+	}
+	modify, excluded := lf.AgentSpec[:idx], lf.AgentSpec[idx:]
+	if strings.Contains(modify, "huge.go") {
+		t.Error("an over-limit file must not be listed as modifiable")
+	}
+	if !strings.Contains(excluded, "huge.go") || !strings.Contains(excluded, fmt.Sprintf("%d", agentFileSizeLimit+1000)) {
+		t.Errorf("the over-limit file must be named in the excluded section with its line count:\n%s", excluded)
+	}
+	if !strings.Contains(modify, "small.go") {
+		t.Error("the under-limit file must remain modifiable")
+	}
+
+	sf, ok := findSignal(p, "stale_file")
+	if !ok {
+		t.Fatal("expected a stale_file item")
+	}
+	if sf.AgentSpec != "" {
+		t.Errorf("a safe item must produce no agent spec, got:\n%s", sf.AgentSpec)
+	}
+}
+
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
