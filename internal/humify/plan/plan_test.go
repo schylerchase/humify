@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -127,6 +128,37 @@ func TestAgentSpecBansHumifyDir(t *testing.T) {
 	// The existing generated-output ban must remain (regression guard for 3169aff).
 	if !strings.Contains(lf.AgentSpec, "node_modules") {
 		t.Error("the generated-output ban must still be present")
+	}
+}
+
+// TestAgentSpecEvidenceMatchesWorklist covers ROADMAP #8: buildAgentSpec listed
+// every modifiable file but capped evidence at 5, so a signal with many findings
+// commanded the agent to edit files it gave no evidence for (scope oversell). Every
+// file under "Files to modify" must also have evidence.
+func TestAgentSpecEvidenceMatchesWorklist(t *testing.T) {
+	var findings []analyze.Finding
+	for i := 0; i < 8; i++ {
+		findings = append(findings, analyze.Finding{
+			ID: fmt.Sprintf("F%03d", i), Category: "maintainability", Signal: "long_function",
+			File: fmt.Sprintf("f%d.go", i), Line: 10 + i, Severity: "major",
+			Evidence: fmt.Sprintf("function spans ~%d lines", 100+i),
+		})
+	}
+	lf, ok := findSignal(Build(analyze.Analysis{Target: "/repo", Findings: findings}), "long_function")
+	if !ok {
+		t.Fatal("expected a long_function item")
+	}
+	spec := lf.AgentSpec
+	mi, ei := strings.Index(spec, "Files to modify:"), strings.Index(spec, "Evidence (file:line finding):")
+	if mi < 0 || ei < 0 {
+		t.Fatalf("spec must have both a modify and an evidence section:\n%s", spec)
+	}
+	modify, evidence := spec[mi:ei], spec[ei:]
+	for i := 0; i < 8; i++ {
+		f := fmt.Sprintf("f%d.go", i)
+		if strings.Contains(modify, f) && !strings.Contains(evidence, f) {
+			t.Errorf("%s is commanded for modification but carries no evidence (scope oversell)", f)
+		}
 	}
 }
 

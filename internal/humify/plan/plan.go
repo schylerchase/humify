@@ -227,7 +227,7 @@ func buildItem(signal string, tpl template, fs []analyze.Finding, fileLOC map[st
 		}
 	}
 	sort.Strings(item.Files)
-	item.AgentSpec = buildAgentSpec(signal, tpl, item, fileLOC, deadFiles)
+	item.AgentSpec = buildAgentSpec(signal, tpl, item, fs, fileLOC, deadFiles)
 	return item
 }
 
@@ -251,7 +251,7 @@ var signalInstructions = map[string]string{
 // transformation rule so the agent needs no additional context to act.
 // Files exceeding agentFileSizeLimit LOC are excluded with an explicit note so
 // the agent is not overwhelmed and the user knows they were skipped.
-func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]int, deadFiles map[string]bool) string {
+func buildAgentSpec(signal string, tpl template, item Item, fs []analyze.Finding, fileLOC map[string]int, deadFiles map[string]bool) string {
 	if tpl.safety == "safe" {
 		return "" // safe items use the quarantine path, not an agent
 	}
@@ -261,6 +261,7 @@ func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]i
 	}
 
 	var within, tooLarge, deadCand []string
+	modifiable := map[string]bool{}
 	for _, f := range item.Files {
 		switch {
 		case deadFiles[f]:
@@ -269,6 +270,7 @@ func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]i
 			tooLarge = append(tooLarge, fmt.Sprintf("%s (%d lines)", f, fileLOC[f]))
 		default:
 			within = append(within, f)
+			modifiable[f] = true
 		}
 	}
 
@@ -291,9 +293,12 @@ func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]i
 			fmt.Fprintf(&b, "  - %s\n", f)
 		}
 	}
-	if len(item.Evidence) > 0 {
+	// Evidence for EVERY modifiable file (not the 5-capped item.Evidence used for
+	// human render), so the spec never commands an edit to a file it justifies with
+	// no finding — the agent acts on this verbatim.
+	if ev := evidenceFor(fs, modifiable); len(ev) > 0 {
 		b.WriteString("\nEvidence (file:line finding):\n")
-		for _, e := range item.Evidence {
+		for _, e := range ev {
 			fmt.Fprintf(&b, "  - %s\n", e)
 		}
 	}
@@ -308,6 +313,20 @@ func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]i
 	b.WriteString("  - Do not run builds or test suites. Humify will validate the change after you exit.\n")
 	b.WriteString("\nWhen complete, output a short summary of what you changed and why.\n")
 	return b.String()
+}
+
+// evidenceFor returns "file:line finding" lines for every finding on a modifiable
+// file, so the agent spec justifies each file it lists to modify. Unlike the
+// 5-capped item.Evidence (for human rendering), this is uncapped — a partial list
+// would tell the agent to edit files it has no evidence for.
+func evidenceFor(fs []analyze.Finding, modifiable map[string]bool) []string {
+	var out []string
+	for _, f := range fs {
+		if modifiable[f.File] {
+			out = append(out, fmt.Sprintf("%s:%d %s", f.File, f.Line, f.Evidence))
+		}
+	}
+	return out
 }
 
 // validationFor states how to confirm an item's change is behavior-preserving.
