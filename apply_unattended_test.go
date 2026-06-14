@@ -3,6 +3,8 @@ package main
 import (
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -11,6 +13,16 @@ import (
 	plan "github.com/schylerryan/humify/internal/humify/plan"
 	hstate "github.com/schylerryan/humify/internal/humify/state"
 )
+
+// mustGit runs a git command in root, failing the test on error.
+func mustGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
 
 // TestApplyUnsafeNonTTYDoesNotHang is the regression guard for the non-TTY confirm
 // bypass. Before the fix, `apply --unsafe-permission --yes` printed "type yes" and
@@ -26,7 +38,21 @@ func TestApplyUnsafeNonTTYDoesNotHang(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("apply spawns the agent via sh -c; POSIX-only")
 	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
 	root := t.TempDir()
+	// The agent path now requires a clean git repo (its only rollback). Seed one.
+	mustGit(t, root, "init")
+	mustGit(t, root, "config", "user.email", "t@e.x")
+	mustGit(t, root, "config", "user.name", "t")
+	mustGit(t, root, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(root, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	mustGit(t, root, "add", "-A")
+	mustGit(t, root, "commit", "-m", "init")
+
 	p := plan.Plan{
 		Schema: hstate.Schema, Tool: "humify", Target: root,
 		Items: []plan.Item{{

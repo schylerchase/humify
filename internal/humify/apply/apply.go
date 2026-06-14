@@ -30,12 +30,15 @@ type FileMove struct {
 	Reason   string `json:"reason"`
 }
 
-// Manifest is the reversible record written into a quarantine directory.
+// Manifest is the auditable record written by an apply. The quarantine path fills
+// Files (the reversible moves); the agent path fills BaseSHA (the commit the working
+// tree is restorable to) and leaves Files empty.
 type Manifest struct {
 	Schema       int        `json:"schema"`
 	Tool         string     `json:"tool"`
 	PlanItem     string     `json:"plan_item"`
 	Timestamp    string     `json:"timestamp"`
+	BaseSHA      string     `json:"base_sha,omitempty"`
 	Verification string     `json:"verification,omitempty"`
 	Validation   ValSummary `json:"validation"`
 	Files        []FileMove `json:"files"`
@@ -162,18 +165,31 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 	return res, nil
 }
 
-// performAgentApply runs an external agent with the item's AgentSpec on stdin,
-// then verifies and rolls back on regression. Unlike quarantine, there is no
-// mechanical file-level undo — the agent's changes are in the working tree and
-// must be reverted via git if the verification gate fails.
+// performAgentApply runs an external agent with the item's AgentSpec on stdin, then
+// verifies. Unlike quarantine there is no mechanical file-level undo, so git is the
+// safety net: it requires a clean git repo, captures the pre-apply commit, and on an
+// agent crash OR a verification regression resets the working tree back to that
+// commit (preserving humify's own .humify/ state). A crash/refusal is a hard error
+// (non-zero exit); a regression is reported as drift; success writes an audit manifest.
 func performAgentApply(root string, item plan.Item, agentCmd string, now time.Time) (Result, error) {
 	res := Result{ItemID: item.ID, Action: "agent", Applied: false}
-	res.RepoDirty = gitDirty(root)
+
+	head, ok := gitHead(root)
+	if !ok {
+		return res, fmt.Errorf("agent apply needs a git repository with at least one commit — git is its only rollback. Commit your work (or run `git init` and commit), or address %s by hand", item.ID)
+	}
+	if repoDirtyExcludingHumify(root) {
+		res.RepoDirty = true
+		return res, fmt.Errorf("agent apply refuses to run on a dirty working tree — uncommitted changes can't be separated from the agent's edits on rollback. Commit or stash first, then retry")
+	}
 
 	baseline, _ := verify.Run(root, now)
 	if err := runAgent(root, agentCmd, item.AgentSpec, 30*time.Minute); err != nil {
-		res.Message = fmt.Sprintf("Agent exited with error: %v. Source may be partially modified — review with `git diff` and revert if needed.", err)
-		return res, nil
+		if rb := gitRestore(root, head); rb != nil {
+			return res, fmt.Errorf("agent exited with error: %v; AND automatic rollback failed: %v — restore by hand with `git reset --hard %s && git clean -fd`", err, rb, shortSHA(head))
+		}
+		res.RolledBack = true
+		return res, fmt.Errorf("agent exited with error: %v — rolled the working tree back to %s", err, shortSHA(head))
 	}
 
 	post, _ := verify.Run(root, now)
@@ -181,14 +197,54 @@ func performAgentApply(root string, item plan.Item, agentCmd string, now time.Ti
 	res.Validated = post.Validated
 
 	if outcome, kinds := gate(baseline, post); outcome != gateOK {
+		if rb := gitRestore(root, head); rb != nil {
+			res.RolledBack = false
+			res.Message = "Agent change " + rollbackReason(outcome, kinds) + ", but rollback FAILED: " + rb.Error() + " — restore by hand with `git reset --hard " + shortSHA(head) + " && git clean -fd`."
+			return res, fmt.Errorf("rollback failed: %v", rb)
+		}
 		res.RolledBack = true
-		res.Message = "Stopped after agent changes: " + rollbackReason(outcome, kinds) + ". The agent's edits are still in the working tree — run `git diff` to review and revert before committing."
+		res.Message = "Rolled back the agent changes: " + rollbackReason(outcome, kinds) + ". The working tree was reset to " + shortSHA(head) + "."
 		return res, nil
 	}
 
 	res.Applied = true
-	res.Message = fmt.Sprintf("Agent completed %s (%s). %s Review changes with `git diff` before committing.", item.ID, item.Title, applyValidationNote(baseline, post))
+	if manifestPath, err := writeAgentManifest(root, item, head, baseline, post); err != nil {
+		// The change is valid and recoverable via git; only the audit record failed.
+		res.Message = fmt.Sprintf("Agent completed %s (%s). %s WARNING: could not write the apply manifest: %v.", item.ID, item.Title, applyValidationNote(baseline, post), err)
+	} else {
+		res.ManifestPath = manifestPath
+		res.Message = fmt.Sprintf("Agent completed %s (%s). %s Review changes with `git diff` before committing.", item.ID, item.Title, applyValidationNote(baseline, post))
+	}
 	return res, nil
+}
+
+// writeAgentManifest records an agent apply under .humify/apply/<id>.json: the base
+// commit it is restorable to plus the validation outcome. The agent path has no file
+// moves, so Files is empty.
+func writeAgentManifest(root string, item plan.Item, baseSHA string, baseline, post verify.Validation) (string, error) {
+	already, newly, fixed := computeDelta(baseline, post)
+	man := Manifest{
+		Schema: state.Schema, Tool: "humify", PlanItem: item.ID,
+		Timestamp: post.GeneratedAt, BaseSHA: baseSHA, Verification: item.Verification,
+		Validation: ValSummary{
+			Ran: post.Validated, Passed: post.Validated && post.Passed,
+			AlreadyFailing: already, NewlyFailing: newly, Fixed: fixed,
+			Detail: applyValidationNote(baseline, post),
+		},
+	}
+	data, err := json.MarshalIndent(man, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	dir := state.Path(root, "apply")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, item.ID+".json")
+	if err := os.WriteFile(path, append(data, '\n'), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // plannedMoves computes the source→quarantine moves (as absolute paths) for the
@@ -384,6 +440,68 @@ func gitDirty(root string) bool {
 	cmd.Dir = root
 	out, err := cmd.Output()
 	return err == nil && strings.TrimSpace(string(out)) != ""
+}
+
+// gitHead returns the current commit SHA, and false if root is not a git repo or has
+// no commits — in which case the agent path has no commit to roll back to.
+func gitHead(root string) (string, bool) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// shortSHA trims a commit SHA for display.
+func shortSHA(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}
+
+// repoDirtyExcludingHumify reports uncommitted changes OUTSIDE .humify/. humify's
+// own state dir (analysis, plan, quarantine, resume state) is created by the tool
+// itself and must not count as user dirt that blocks the agent path — otherwise
+// `humify plan` would leave untracked JSON that makes every agent apply refuse.
+func repoDirtyExcludingHumify(root string) bool {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		path := strings.TrimSpace(line[3:]) // porcelain: "XY <path>"
+		if path == state.Dir || strings.HasPrefix(path, state.Dir+"/") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// gitRestore returns the working tree to sha: tracked files via `reset --hard`, and
+// agent-created untracked files via `clean -fd` — but it preserves humify's own
+// .humify/ state directory, which clean would otherwise delete (quarantine copies,
+// resume state). It is the agent path's only undo, so a failure is surfaced loudly.
+func gitRestore(root, sha string) error {
+	reset := exec.Command("git", "reset", "--hard", sha)
+	reset.Dir = root
+	if out, err := reset.CombinedOutput(); err != nil {
+		return fmt.Errorf("git reset --hard: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	clean := exec.Command("git", "clean", "-fd", "-e", state.Dir)
+	clean.Dir = root
+	if out, err := clean.CombinedOutput(); err != nil {
+		return fmt.Errorf("git clean -fd: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // computeDelta classifies kinds into already-failing (cleanly failed before and
