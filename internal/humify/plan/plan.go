@@ -302,6 +302,7 @@ func buildAgentSpec(signal string, tpl template, item Item, fileLOC map[string]i
 	b.WriteString("  - Do not change observable behavior beyond what the transformation requires.\n")
 	b.WriteString("  - Do not touch files not listed under \"Files to modify\" above. This is a hard rule — no exceptions.\n")
 	b.WriteString("  - Never modify generated or compiled output: dist/, build/, .next/, out/, coverage/, node_modules/, vendor/, target/, __pycache__/.\n")
+	b.WriteString("  - Never modify or delete humify's own state directory (.humify/, .humify-dev/, .humify-runs/, .humify-worktrees/) — it holds the analysis, plan, and quarantine records this run depends on.\n")
 	b.WriteString("  - Never create planning, notes, or scratch files in the repository.\n")
 	b.WriteString("  - If a listed file no longer exists or the finding no longer applies, skip it and say why.\n")
 	b.WriteString("  - Do not run builds or test suites. Humify will validate the change after you exit.\n")

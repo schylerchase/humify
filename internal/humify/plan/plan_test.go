@@ -106,6 +106,30 @@ func TestDeadCandidateExcludedFromRefactorSpecNonDestructively(t *testing.T) {
 	}
 }
 
+// TestAgentSpecBansHumifyDir covers ROADMAP #13: the agent runs with cwd at the
+// repo root and could wander into .humify/, corrupting the analysis/plan/quarantine
+// state this very run depends on. The constraint block must forbid it (3169aff
+// banned generated dirs but not .humify/).
+func TestAgentSpecBansHumifyDir(t *testing.T) {
+	a := analyze.Analysis{
+		Target: "/repo",
+		Findings: []analyze.Finding{
+			{ID: "F001", Category: "maintainability", Signal: "long_function", File: "svc.go", Line: 10, Severity: "major"},
+		},
+	}
+	lf, ok := findSignal(Build(a), "long_function")
+	if !ok {
+		t.Fatal("expected a long_function item")
+	}
+	if !strings.Contains(lf.AgentSpec, ".humify") {
+		t.Errorf("agent spec must forbid touching humify's state dir .humify/:\n%s", lf.AgentSpec)
+	}
+	// The existing generated-output ban must remain (regression guard for 3169aff).
+	if !strings.Contains(lf.AgentSpec, "node_modules") {
+		t.Error("the generated-output ban must still be present")
+	}
+}
+
 func contains(xs []string, want string) bool {
 	for _, x := range xs {
 		if x == want {
