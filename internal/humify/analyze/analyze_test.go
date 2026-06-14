@@ -122,6 +122,37 @@ func TestInspectPythonBroadVsSwallowedAreExclusive(t *testing.T) {
 	}
 }
 
+// TestInspectBraceBroadCatch covers ROADMAP #7: broad_catch was Python/Ruby-only;
+// brace languages emitted only swallowed_error. A catch-all with a body in JS/TS,
+// Java/C# (Exception/Throwable/...), or C++ (catch(...)) is now broad_catch; a narrow
+// typed catch is not; and an EMPTY broad catch stays swallowed_error only.
+func TestInspectBraceBroadCatch(t *testing.T) {
+	for _, c := range []struct{ name, path, lang, src string }{
+		{"java", "A.java", "java", "class A { void f(){ try { g(); } catch (Exception e) { log(e); } } }\n"},
+		{"csharp", "A.cs", "cs", "class A { void F(){ try { G(); } catch (Exception e) { Log(e); } } }\n"},
+		{"cpp", "a.cpp", "cpp", "void f(){ try { g(); } catch (...) { handle(); } }\n"},
+		{"js", "a.js", "js", "function f(){ try { g(); } catch (e) { log(e); } }\n"},
+	} {
+		got := signalSet(inspectSrc(c.path, c.lang, c.src))
+		if !got["broad_catch"] {
+			t.Errorf("%s: expected broad_catch, got %v", c.name, got)
+		}
+		if got["swallowed_error"] {
+			t.Errorf("%s: a bodied broad catch must not be swallowed_error, got %v", c.name, got)
+		}
+	}
+	if signalSet(inspectSrc("A.java", "java", "class A { void f(){ try { g(); } catch (IOException e) { log(e); } } }\n"))["broad_catch"] {
+		t.Error("a narrow typed catch must not be broad_catch")
+	}
+	empty := signalSet(inspectSrc("A.java", "java", "class A { void f(){ try { g(); } catch (Exception e) {} } }\n"))
+	if !empty["swallowed_error"] {
+		t.Errorf("an empty broad catch should be swallowed_error, got %v", empty)
+	}
+	if empty["broad_catch"] {
+		t.Errorf("an empty broad catch must NOT also be broad_catch (double-count), got %v", empty)
+	}
+}
+
 func TestSwallowedRespectsIntent(t *testing.T) {
 	// A bare empty catch with no explanation is still a real swallow.
 	if !signalSet(inspectSrc("a.js", "js", "function f(){ try{g()}catch(e){} }\n"))["swallowed_error"] {

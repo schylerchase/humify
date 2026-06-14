@@ -93,6 +93,12 @@ var (
 	catchOpenRe   = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*$`)
 	bareExceptRe  = regexp.MustCompile(`^\s*except\s*:\s*$`)
 	broadExceptRe = regexp.MustCompile(`^\s*except\s+(?:Exception|BaseException)\b`)
+	// Brace-language broad (catch-all) handlers. The leading (?:^|[^.\w]) keeps a
+	// statement catch distinct from a method call like promise.catch(...).
+	jsCatchRe        = regexp.MustCompile(`(?:^|[^.\w])catch\s*(?:\([^)]*\))?\s*\{`)                                          // JS/TS: any catch is catch-all
+	braceBroadTypeRe = regexp.MustCompile(`(?:^|[^.\w])catch\s*\(\s*(?:final\s+)?(?:System\.)?(?:Exception|Throwable|RuntimeException|Error)\b`) // Java/C#
+	braceBareCatchRe = regexp.MustCompile(`(?:^|[^.\w])catch\s*\{`)                                                          // C# catch-all `catch {`
+	cppCatchAllRe    = regexp.MustCompile(`(?:^|[^.\w])catch\s*\(\s*\.\.\.\s*\)`)                                            // C++ catch(...)
 	// Matches an err-check opening line, with or without a leading short-var/
 	// assignment header (`if err := g(); err != nil {`). `err` stays hardcoded.
 	goErrIfRe = regexp.MustCompile(`^\s*if\s+(?:[^;{]*;\s*)?err\s*!=\s*nil\s*\{\s*$`)
@@ -126,8 +132,17 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 			case lang == "go" && goErrIfRe.MatchString(in.code) && nextIsEmptyClose(code, i):
 				closeLine = nextNonBlank(code, i+1)
 			}
-			if closeLine >= 0 && !intentional(infos, raw, lang, i, closeLine) {
-				out = append(out, swallowed(path, i+1, ev))
+			switch {
+			case closeLine >= 0:
+				// Empty catch → swallowed (the more severe); never also broad_catch.
+				if !intentional(infos, raw, lang, i, closeLine) {
+					out = append(out, swallowed(path, i+1, ev))
+				}
+			case broadBraceCatch(in.code, lang):
+				// Catch-all with a real body → broad_catch (unless explicitly suppressed).
+				if !suppressedAt(raw, lang, i, i) {
+					out = append(out, broadCatch(path, i+1, ev))
+				}
 			}
 		} else {
 			// broad == a bare `except:` or `except Exception/BaseException`. A narrow
@@ -142,8 +157,7 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 			case broad:
 				// Broad catch with a real body → broad_catch (unless explicitly suppressed).
 				if !suppressedAt(raw, lang, i, i+1) {
-					out = append(out, mark("correctness", "broad_catch", path, i+1, "warning", "medium", ev,
-						"Catching everything hides the errors you did not anticipate; catch the specific exception you can handle."))
+					out = append(out, broadCatch(path, i+1, ev))
 				}
 			}
 		}
@@ -175,6 +189,30 @@ func todoMarker(comment string) string {
 func swallowed(path string, line int, evidence string) Finding {
 	return mark("correctness", "swallowed_error", path, line, "major", "high", evidence,
 		"An error is caught and discarded; handle it, wrap it with context, or at minimum log it — silent failure is the hardest bug to find.")
+}
+
+// broadCatch builds the standard broad-catch finding, shared by the brace and
+// indentation detectors so both describe the same signal identically.
+func broadCatch(path string, line int, evidence string) Finding {
+	return mark("correctness", "broad_catch", path, line, "warning", "medium", evidence,
+		"Catching everything hides the errors you did not anticipate; catch the specific exception you can handle.")
+}
+
+// broadBraceCatch reports whether a brace-language line opens an over-broad (catch-
+// all) handler: any catch in JS/TS (which cannot narrow by type), a catch of
+// Exception/Throwable/RuntimeException/Error in Java/C#, or catch(...) in C++. A
+// narrow typed catch (catch (IOException e)) is deliberate handling and never fires.
+// Empty catches are handled by the swallowed_error path before this is reached.
+func broadBraceCatch(code, lang string) bool {
+	switch lang {
+	case "js", "ts":
+		return jsCatchRe.MatchString(code)
+	case "java", "cs":
+		return braceBroadTypeRe.MatchString(code) || braceBareCatchRe.MatchString(code)
+	case "cpp":
+		return cppCatchAllRe.MatchString(code)
+	}
+	return false
 }
 
 // intentional reports whether the catch/except whose block spans i..closeLine is
