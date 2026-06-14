@@ -58,7 +58,7 @@ func score(files []FileScore, findings []Finding, project detect.Project) Catego
 		Readability:     clamp(100 - byCat["readability"]),
 		Maintainability: clamp(100 - byCat["maintainability"]),
 		Correctness:     clamp(100 - byCat["correctness"]),
-		Testability:     testability(project, countSignal(findings, "long_function")),
+		Testability:     testability(project, countSignal(findings, SignalLongFunction)),
 		Efficiency:      efficiency(findings),
 	}
 	s.Overall = clamp(weighted(s))
@@ -82,7 +82,7 @@ func testability(project detect.Project, longFuncs int) int {
 // efficiency starts healthy and subtracts a small amount for complexity signals
 // (long functions, deep nesting). It never claims a runtime cost it cannot prove.
 func efficiency(findings []Finding) int {
-	complexity := countSignal(findings, "long_function") + countSignal(findings, "deep_nesting")
+	complexity := countSignal(findings, SignalLongFunction) + countSignal(findings, SignalDeepNesting)
 	return clamp(100 - capPenalty(complexity*2, 30))
 }
 

@@ -25,7 +25,7 @@ func metricFindings(path string, m Metrics, cfg Config) []Finding {
 	var out []Finding
 	if m.LOC > cfg.MaxFileLines {
 		out = append(out, Finding{
-			Category: "maintainability", Signal: "giant_file", File: path, Line: 1,
+			Category: "maintainability", Signal: SignalGiantFile, File: path, Line: 1,
 			Severity: sev(m.LOC, cfg.MaxFileLines, 2), Risk: "medium",
 			Evidence: fmt.Sprintf("%d lines (threshold %d)", m.LOC, cfg.MaxFileLines),
 			Detail:   "Large files usually mix several responsibilities; split by concern so each unit is independently readable and testable.",
@@ -33,7 +33,7 @@ func metricFindings(path string, m Metrics, cfg Config) []Finding {
 	}
 	if m.LongestFunc > cfg.MaxFunctionLines {
 		out = append(out, Finding{
-			Category: "maintainability", Signal: "long_function", File: path, Line: m.LongestLine,
+			Category: "maintainability", Signal: SignalLongFunction, File: path, Line: m.LongestLine,
 			Severity: sev(m.LongestFunc, cfg.MaxFunctionLines, 2), Risk: "medium",
 			Evidence: fmt.Sprintf("function spans ~%d lines (threshold %d)", m.LongestFunc, cfg.MaxFunctionLines),
 			Detail:   "A function this long likely does many unrelated steps; extract cohesive helpers with intention-revealing names.",
@@ -41,7 +41,7 @@ func metricFindings(path string, m Metrics, cfg Config) []Finding {
 	}
 	if m.MaxNesting > cfg.MaxNestingDepth {
 		out = append(out, Finding{
-			Category: "readability", Signal: "deep_nesting", File: path, Line: m.DeepestLine,
+			Category: "readability", Signal: SignalDeepNesting, File: path, Line: m.DeepestLine,
 			Severity: sev(m.MaxNesting, cfg.MaxNestingDepth, 2), Risk: "low",
 			Evidence: fmt.Sprintf("nesting depth %d (threshold %d)", m.MaxNesting, cfg.MaxNestingDepth),
 			Detail:   "Deep nesting hides control flow; use early returns or guard clauses to flatten it.",
@@ -75,7 +75,7 @@ func nameFindings(path, lang string, infos []lineInfo, raw []string) []Finding {
 			continue
 		}
 		out = append(out, Finding{
-			Category: "readability", Signal: "vague_name", File: path, Line: i + 1,
+			Category: "readability", Signal: SignalVagueName, File: path, Line: i + 1,
 			Severity: "info", Risk: "low", Evidence: strings.TrimSpace(raw[i]),
 			Detail:   fmt.Sprintf("The name %q does not say what it is or does; rename it for the concept it represents.", mtch[1]),
 		})
@@ -116,7 +116,7 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 	for i, in := range infos {
 		ev := strings.TrimSpace(raw[i])
 		if loc := todoMarker(in.comment); loc != "" {
-			out = append(out, mark("maintainability", "todo_marker", path, i+1, "info", "low", ev,
+			out = append(out, mark("maintainability", SignalTodoMarker, path, i+1, "info", "low", ev,
 				"Leftover "+loc+" marker — resolve it or convert it into a tracked task; unfinished markers often mark machine-stubbed code."))
 		}
 		if clike {
@@ -162,7 +162,7 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 			}
 		}
 		if strings.TrimSpace(in.code) == "" && in.comment != "" && noisyComment(in.comment, code, i) {
-			out = append(out, mark("readability", "noisy_comment", path, i+1, "info", "low", ev,
+			out = append(out, mark("readability", SignalNoisyComment, path, i+1, "info", "low", ev,
 				"This comment restates the code it precedes; delete it or explain the why, not the what."))
 		}
 	}
@@ -187,14 +187,14 @@ func todoMarker(comment string) string {
 
 // swallowed builds the standard swallowed-error finding.
 func swallowed(path string, line int, evidence string) Finding {
-	return mark("correctness", "swallowed_error", path, line, "major", "high", evidence,
+	return mark("correctness", SignalSwallowedError, path, line, "major", "high", evidence,
 		"An error is caught and discarded; handle it, wrap it with context, or at minimum log it — silent failure is the hardest bug to find.")
 }
 
 // broadCatch builds the standard broad-catch finding, shared by the brace and
 // indentation detectors so both describe the same signal identically.
 func broadCatch(path string, line int, evidence string) Finding {
-	return mark("correctness", "broad_catch", path, line, "warning", "medium", evidence,
+	return mark("correctness", SignalBroadCatch, path, line, "warning", "medium", evidence,
 		"Catching everything hides the errors you did not anticipate; catch the specific exception you can handle.")
 }
 

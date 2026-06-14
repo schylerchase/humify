@@ -176,7 +176,7 @@ func staleFindings(res scan.Result) []Finding {
 	for _, f := range res.Files {
 		if reason := staleReason(f); reason != "" {
 			out = append(out, Finding{
-				Category: "maintainability", Signal: "stale_file", File: f.Path, Line: 1,
+				Category: "maintainability", Signal: SignalStaleFile, File: f.Path, Line: 1,
 				Severity: "warning", Risk: "low", Evidence: reason,
 				Detail: "This file looks throwaway or empty; quarantine it (reversibly) and re-run validation to confirm nothing depends on it.",
 			})

@@ -32,7 +32,7 @@ func deadModuleFindings(res scan.Result, cfg Config) []Finding {
 			continue
 		}
 		out = append(out, Finding{
-			Category: "maintainability", Signal: "dead_module", File: f.Path, Line: 1,
+			Category: "maintainability", Signal: SignalDeadModule, File: f.Path, Line: 1,
 			Severity: "warning", Risk: "low",
 			Evidence: "no import-shaped reference from any other module",
 			Detail: "No other module imports this file and it is not a known entry point, so it may be dead. " +
