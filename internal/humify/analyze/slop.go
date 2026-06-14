@@ -93,7 +93,9 @@ var (
 	catchOpenRe   = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*$`)
 	bareExceptRe  = regexp.MustCompile(`^\s*except\s*:\s*$`)
 	broadExceptRe = regexp.MustCompile(`^\s*except\s+(?:Exception|BaseException)\b`)
-	goErrIfRe     = regexp.MustCompile(`^\s*if\s+err\s*!=\s*nil\s*\{\s*$`)
+	// Matches an err-check opening line, with or without a leading short-var/
+	// assignment header (`if err := g(); err != nil {`). `err` stays hardcoded.
+	goErrIfRe = regexp.MustCompile(`^\s*if\s+(?:[^;{]*;\s*)?err\s*!=\s*nil\s*\{\s*$`)
 	identRe       = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 	suppressRe    = regexp.MustCompile(`(?i)\b(?:noqa|nolint|eslint-disable)\b`)
 	dividerRunRe  = regexp.MustCompile(`[-=#*~]{3,}`)
@@ -112,10 +114,19 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 				"Leftover "+loc+" marker — resolve it or convert it into a tracked task; unfinished markers often mark machine-stubbed code."))
 		}
 		if clike {
-			emptyCatch := emptyCatchRe.MatchString(in.code) ||
-				(catchOpenRe.MatchString(in.code) && nextIsEmptyClose(code, i)) ||
-				(lang == "go" && goErrIfRe.MatchString(in.code) && nextIsEmptyClose(code, i))
-			if emptyCatch && !intentional(infos, raw, lang, i) {
+			// closeLine is the line holding the block's closing brace: line i itself
+			// for a single-line empty block, or the next code line for a multi-line
+			// one. The interior i+1..closeLine-1 is where a documenting comment sits.
+			closeLine := -1
+			switch {
+			case emptyCatchRe.MatchString(in.code):
+				closeLine = i
+			case catchOpenRe.MatchString(in.code) && nextIsEmptyClose(code, i):
+				closeLine = nextNonBlank(code, i+1)
+			case lang == "go" && goErrIfRe.MatchString(in.code) && nextIsEmptyClose(code, i):
+				closeLine = nextNonBlank(code, i+1)
+			}
+			if closeLine >= 0 && !intentional(infos, raw, lang, i, closeLine) {
 				out = append(out, swallowed(path, i+1, ev))
 			}
 		} else {
@@ -125,12 +136,12 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 			switch {
 			case broad && nextIsPass(code, i):
 				// Empty broad catch → swallowed (the more severe); never also broad_catch.
-				if !intentional(infos, raw, lang, i) {
+				if !intentional(infos, raw, lang, i, i+1) {
 					out = append(out, swallowed(path, i+1, ev))
 				}
 			case broad:
 				// Broad catch with a real body → broad_catch (unless explicitly suppressed).
-				if !suppressedAt(raw, lang, i) {
+				if !suppressedAt(raw, lang, i, i+1) {
 					out = append(out, mark("correctness", "broad_catch", path, i+1, "warning", "medium", ev,
 						"Catching everything hides the errors you did not anticipate; catch the specific exception you can handle."))
 				}
@@ -166,23 +177,22 @@ func swallowed(path string, line int, evidence string) Finding {
 		"An error is caught and discarded; handle it, wrap it with context, or at minimum log it — silent failure is the hardest bug to find.")
 }
 
-// intentional reports whether the catch/except opened at line i is deliberate: it
-// carries an explanatory comment, or a lint-suppression marker. Such a swallow is
-// documented intent, not a hidden bug, so Humify does not flag it. For indentation
-// languages the doc may sit on the body (`pass`) line, so i+1 is also considered.
-func intentional(infos []lineInfo, raw []string, lang string, i int) bool {
-	for _, k := range catchLines(lang, i) {
+// intentional reports whether the catch/except whose block spans i..closeLine is
+// deliberate: it carries an explanatory comment, or a lint-suppression marker. Such
+// a swallow is documented intent, not a hidden bug, so Humify does not flag it.
+func intentional(infos []lineInfo, raw []string, lang string, i, closeLine int) bool {
+	for _, k := range catchLines(lang, i, closeLine) {
 		if k >= 0 && k < len(infos) && strings.TrimSpace(infos[k].comment) != "" {
 			return true
 		}
 	}
-	return suppressedAt(raw, lang, i)
+	return suppressedAt(raw, lang, i, closeLine)
 }
 
-// suppressedAt reports whether the catch at line i (or its body line, for indent
-// languages) carries an explicit lint-suppression marker.
-func suppressedAt(raw []string, lang string, i int) bool {
-	for _, k := range catchLines(lang, i) {
+// suppressedAt reports whether the catch whose block spans i..closeLine carries an
+// explicit lint-suppression marker on any of its lines.
+func suppressedAt(raw []string, lang string, i, closeLine int) bool {
+	for _, k := range catchLines(lang, i, closeLine) {
 		if k >= 0 && k < len(raw) && suppressRe.MatchString(raw[k]) {
 			return true
 		}
@@ -190,13 +200,21 @@ func suppressedAt(raw []string, lang string, i int) bool {
 	return false
 }
 
-// catchLines returns the line indices that may document a catch at line i: just i
-// for brace languages, i and i+1 for indentation languages (the `pass` body line).
-func catchLines(lang string, i int) []int {
+// catchLines returns the line indices that may document a catch. For brace
+// languages that is the whole block span i..closeLine (opener, interior, closer) —
+// so a comment on the body of a multi-line block counts, while a single-line empty
+// block (closeLine==i) is documented only by a comment on its own line, never by an
+// unrelated comment on a following line. For indentation languages the doc sits on
+// the opener or its body (`pass`) line, so i and i+1.
+func catchLines(lang string, i, closeLine int) []int {
 	if family(lang) == "indent" {
 		return []int{i, i + 1}
 	}
-	return []int{i}
+	out := make([]int, 0, closeLine-i+1)
+	for k := i; k <= closeLine; k++ {
+		out = append(out, k)
+	}
+	return out
 }
 
 // mark constructs a Finding with the common fields filled.

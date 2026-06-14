@@ -144,6 +144,26 @@ func TestSwallowedRespectsIntent(t *testing.T) {
 	}
 }
 
+// TestSwallowedGoBodyCommentAndAssignment covers ROADMAP #3: the common multi-line
+// Go err-block documented by a BODY comment must be honored (not a false positive),
+// the assignment idiom `if err := g(); err != nil {}` must be caught, and a
+// single-line empty catch must NOT be excused by an unrelated comment on the
+// following line (the discriminator a naive catchLines=[i,i+1] fix would regress).
+func TestSwallowedGoBodyCommentAndAssignment(t *testing.T) {
+	bodyDoc := "package x\nfunc f() {\n\tif err != nil {\n\t\t// ignore: best effort\n\t}\n}\n"
+	if signalSet(inspectSrc("a.go", "go", bodyDoc))["swallowed_error"] {
+		t.Error("a multi-line err block documented by a body comment must not be swallowed_error")
+	}
+	assign := "package x\nfunc f() {\n\tif err := g(); err != nil {\n\t}\n}\n"
+	if !signalSet(inspectSrc("b.go", "go", assign))["swallowed_error"] {
+		t.Error("`if err := g(); err != nil {}` (empty) must be flagged swallowed_error")
+	}
+	jsTrail := "function f(){\n\ttry{g()}catch(e){}\n\t// unrelated\n}\n"
+	if !signalSet(inspectSrc("c.js", "js", jsTrail))["swallowed_error"] {
+		t.Error("a single-line empty catch must stay flagged despite a following-line comment")
+	}
+}
+
 func TestNoisyCommentSkipsSectionLabels(t *testing.T) {
 	// Real section-header / divider comments from the validated repos — all FPs.
 	for _, c := range []string{
