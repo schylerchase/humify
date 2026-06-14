@@ -63,6 +63,26 @@ func applyAgent(root string, p plan.Plan, agentCmd string) (Result, error) {
 	return Apply(root, p, "HMF-001", false, true, agentCmd, true, time.Now())
 }
 
+// TestApplyAgentDryRunPreviewDoesNotExecute covers the preview branch (ROADMAP #11):
+// with --unsafe-permission but without --yes, apply must describe the spawn and the
+// spec, and must NOT run the agent. No git needed — preview returns before any work.
+func TestApplyAgentDryRunPreviewDoesNotExecute(t *testing.T) {
+	root := t.TempDir()
+	res, err := Apply(root, agentPlan("SPEC-MARKER"), "HMF-001", true, false, "echo RAN > ran.txt", true, time.Now())
+	if err != nil {
+		t.Fatalf("dry-run preview should not error: %v", err)
+	}
+	if !res.DryRun || res.Applied || res.RolledBack {
+		t.Errorf("preview must be a no-op dry run: %+v", res)
+	}
+	if !strings.Contains(res.Message, "would spawn agent") || !strings.Contains(res.Message, "SPEC-MARKER") {
+		t.Errorf("preview must describe the spawn and include the spec: %q", res.Message)
+	}
+	if isFile(filepath.Join(root, "ran.txt")) {
+		t.Error("the agent must never run on a dry-run preview")
+	}
+}
+
 func TestAgentApplyRefusesDirtyRepo(t *testing.T) {
 	requireGit(t)
 	root := t.TempDir()
