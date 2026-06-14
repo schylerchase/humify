@@ -234,23 +234,29 @@ func findSignal(p Plan, signal string) (Item, bool) {
 	return Item{}, false
 }
 
-// TestSignalRegistryCompleteness guards ROADMAP #9: a detector signal with no plan
-// template is silently dropped by Build (the `continue` at the templates lookup),
-// and a non-safe signal with no agent instruction silently falls back to tpl.change
-// in buildAgentSpec. It iterates analyze.Signals() — the canonical registry, NOT a
-// list re-hardcoded here, so a future detector that forgets a remediation fails this
-// test instead of vanishing from the plan.
-func TestSignalRegistryCompleteness(t *testing.T) {
+// TestSignalDescriptorRegistryIsComplete guards ROADMAP #9 + #16: every analyze
+// signal must have a descriptor (else Build silently drops it), every non-safe
+// signal must carry an agent instruction (else buildAgentSpec falls back silently),
+// no safe signal may carry a dead instruction buildAgentSpec never reads, and every
+// descriptor must have an in-range order tier. It iterates analyze.Signals() — the
+// canonical registry, NOT a list re-hardcoded here — so a future detector that
+// forgets a remediation fails this test instead of vanishing from the plan.
+func TestSignalDescriptorRegistryIsComplete(t *testing.T) {
 	for _, sig := range analyze.Signals() {
-		tpl, ok := templates[sig]
+		d, ok := descriptors[sig]
 		if !ok {
-			t.Errorf("signal %q has no plan template — Build would silently drop it", sig)
+			t.Errorf("signal %q has no descriptor — Build would silently drop it", sig)
 			continue
 		}
-		if tpl.safety != "safe" {
-			if _, ok := signalInstructions[sig]; !ok {
-				t.Errorf("non-safe signal %q has no agent instruction — buildAgentSpec would fall back silently", sig)
+		if d.tier < 0 || d.tier > 2 {
+			t.Errorf("signal %q has an out-of-range order tier %d", sig, d.tier)
+		}
+		if d.safety == "safe" {
+			if d.instruction != "" {
+				t.Errorf("safe signal %q carries a dead agent instruction (buildAgentSpec short-circuits safe items)", sig)
 			}
+		} else if d.instruction == "" {
+			t.Errorf("non-safe signal %q has no agent instruction — buildAgentSpec would fall back silently", sig)
 		}
 	}
 }
