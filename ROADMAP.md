@@ -15,14 +15,12 @@ Status: ✅ done · ⬜ open
   Fixed: `gate()` now returns `OK | Regressed | Unverifiable`; an indeterminate baseline
   is never treated as a clean failure. Truth-table tests in `apply_test.go` (`TestGate`).
 
-- ⬜ **2. Agent-path apply is destructive & dishonest on failure** *(the big one — next)*.
-  `apply/apply.go` `performAgentApply`, exit mapping `humify.go`. On regression it advises
-  `git checkout -- .` which strands the new untracked files the agent created; an agent
-  crash returns `nil` → **exits 0**; no audit manifest for the agent path. Fix as one change:
-  capture a pre-apply git SHA → `git reset --hard <sha> + git clean -fd`; refuse the agent
-  path when the repo is already dirty (`RepoDirty` is computed and ignored); distinct
-  non-zero exit codes (reconcile with `humify.go` keying `exitDrift` off `RolledBack`);
-  write an agent manifest. E2E regression + error-exit tests. **(L)**
+- ✅ **2. Agent-path apply is destructive & dishonest on failure.** `apply/apply.go`
+  `performAgentApply`. Fixed: requires a clean git repo (dirty-check excludes `.humify/`),
+  captures the pre-apply commit, and on crash OR regression runs `git reset --hard <sha>`
+  + `git clean -fd -e .humify` to fully restore. Crash/refuse exit non-zero (error), a
+  regression is drift (`RolledBack`→`exitDrift`), success writes `.humify/apply/<id>.json`
+  with the base SHA. Unit + toolchain-gated E2E tests.
 
 - ✅ **4. Typo'd flag became a no-op dry run that exited 0.** `main.go parseArgs` silently
   dropped unknown `-`flags. Fixed: unrecognized flags now error (`exitError`); `-h`/`--help`
@@ -31,27 +29,42 @@ Status: ✅ done · ⬜ open
 - ✅ **5. `apply --json` emitted PascalCase** while the rest of the surface is snake_case.
   Fixed: snake_case json tags on `apply.Result`.
 
-- ⬜ **3. `swallowed_error` detector — false-positives documented code, misses common idiom.**
-  `analyze/slop.go:96,173-200`. `intentional()` doesn't scan brace-language *body* comments,
-  so `if err != nil { // ignore: best effort }` still fires the harshest signal; and
-  `goErrIfRe` misses `if err := f(); err != nil {}`. **(M + S)** — core product promise.
+- ✅ **3. `swallowed_error` detector — false-positives documented code, misses common idiom.**
+  `analyze/slop.go`. Fixed: intent detection now spans the whole block (i..closeLine), so
+  the multi-line `if err != nil { // ignore }` body comment is honored while a single-line
+  catch is not excused by a following-line comment; `goErrIfRe` accepts an optional
+  assignment header (`if err := f(); err != nil {}`).
 
 ## Worth doing
-- ⬜ **6.** Quarantine `move`/`restore` can overwrite the only reversible copy and reports a
-  false "clean tree" when restore fails (`apply.go:195-215`). **(M)**
-- ⬜ **7.** `broad_catch` only fires for Go/Python — invisible in Java/C++/C#/JS/TS (`slop.go:114-138`). **(M)**
-- ⬜ **8.** Plan binds the agent worklist to a 5-item *display* cap → scope oversell (`plan.go:197,215`). **(M)**
-- ⬜ **9.** New detector signals silently dropped if they lack a template — add a registry-completeness test (`plan.go:158`). **(S)**
-- ⬜ **10.** Status shows stale scores; `plan.AnalysisAt` is written but read nowhere (`render.go:151`). **(S)**
-- ⬜ **11–12.** Test gaps: agent dry-run preview never runs the agent; `buildAgentSpec` size-cap/safe short-circuit untested. **(S/M)**
+- ✅ **6.** Quarantine `move`/`restore` overwrote the only reversible copy and reported a
+  false "clean tree" when restore failed. Fixed: `move` refuses an existing destination;
+  `restore` returns an error naming stranded files; rollback callers no longer claim a clean
+  tree on a failed restore (`apply.go`).
+- ✅ **7.** `broad_catch` was Python/Ruby-only. Fixed: detects catch-all handlers in JS/TS
+  (any catch), Java/C# (`Exception`/`Throwable`/`RuntimeException`/`Error`), and C++
+  (`catch(...)`); narrow typed catches don't fire; promise `.catch()` excluded (`slop.go`).
+- ✅ **8.** Agent worklist oversold scope vs a 5-item evidence cap. Fixed: `buildAgentSpec`
+  emits evidence for every modifiable file via `evidenceFor`; the 5-cap stays only for the
+  human view (`plan.go`).
+- ✅ **9.** New detector signals could be silently dropped. Fixed: `analyze.Signals()`
+  canonical registry + `TestSignalDescriptorRegistryIsComplete` (proven to fail on an
+  unregistered signal).
+- ✅ **10.** `plan.AnalysisAt` was written but read nowhere. Fixed: `printStatus` flags the
+  plan stale when the on-disk analysis changed since (`render.go`).
+- ✅ **11–12.** Test gaps closed: agent dry-run preview (never runs the agent) and
+  `buildAgentSpec` size-cap / safe short-circuit are now covered.
 
 ## Nice to have
-- ⬜ **13.** Agent constraints don't ban `.humify/` (`plan.go:267`). **(S)**
-- ⬜ **14.** `status --json` emits bare `{}` with no presence flags. **(S)**
-- ⬜ **15.** Comment metrics computed/persisted but read by nothing; `countKinds` miscounts delimiter lines (`analyze/metrics.go`). **(S)**
-- ⬜ **16.** Signal metadata fragmented across `templates`/`signalInstructions`/`order` — unify behind one descriptor (do #9's guard first). **(M)**
+- ✅ **13.** Agent constraints now ban `.humify/` and its siblings (`plan.go` buildAgentSpec).
+- ✅ **14.** `status --json` now emits `have_analysis`/`have_plan`/`have_validation` presence
+  flags (absent vs empty distinguishable) (`humify.go`).
+- ✅ **15.** Removed the unread `code`/`comment`/`blank`/`comment_ratio` metrics (the
+  delimiter miscount became moot) (`analyze/metrics.go`).
+- ✅ **16.** Signal metadata unified behind one `signalDescriptor` registry keyed by the
+  `analyze.Signal*` constants; resolved the missing-`dead_module` / dead-`stale_file`
+  instruction drift (`plan.go`).
 
-## Couplings to watch
-- #2's exit-code scheme and `RolledBack` renaming interact at the `exitDrift` mapping — design together.
-- #9 (cheap guard) and #16 (proper refactor) target the same registry fragmentation — guard first.
-- #2's pre-apply git SHA serves both the real revert and the audit manifest — capture once.
+## Couplings (resolved)
+- #2 reused the existing `{error, RolledBack}` outcomes rather than a new exit code: crash/refuse → error→`exitError`, regression → `RolledBack`→`exitDrift`. No `main.go` change needed.
+- #9's guard landed first; #16 then collapsed the three maps and re-expressed the guard against the single registry.
+- #2's pre-apply git SHA is captured once and serves both the hard rollback and the audit manifest.
