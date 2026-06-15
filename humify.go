@@ -341,7 +341,13 @@ func stateCheck(root string) check {
 
 // statusView is the combined JSON shape `status --json` emits.
 func statusView(a analyze.Analysis, haveA bool, p hplan.Plan, haveP bool, v verify.Validation, haveV bool) map[string]any {
-	view := map[string]any{}
+	// Presence flags are always emitted so a consumer can tell "absent" from "empty"
+	// — an empty state would otherwise marshal to a bare {} with no signal.
+	view := map[string]any{
+		"have_analysis":   haveA,
+		"have_plan":       haveP,
+		"have_validation": haveV,
+	}
 	if haveA {
 		view["analysis"] = a
 	}

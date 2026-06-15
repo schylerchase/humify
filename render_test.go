@@ -47,3 +47,27 @@ func TestPrintStatus_NoStaleWhenMatched(t *testing.T) {
 		t.Errorf("a plan matching the current analysis must not be flagged stale:\n%s", out)
 	}
 }
+
+// TestStatusView_PresenceFlags covers ROADMAP #14: empty state marshalled to a bare
+// {}, so a consumer could not tell "absent" from "empty". The presence booleans must
+// always be present.
+func TestStatusView_PresenceFlags(t *testing.T) {
+	empty := statusView(analyze.Analysis{}, false, hplan.Plan{}, false, verify.Validation{}, false)
+	for _, k := range []string{"have_analysis", "have_plan", "have_validation"} {
+		if v, ok := empty[k].(bool); !ok || v {
+			t.Errorf("%s must be present and false on empty state, got %v (present=%v)", k, empty[k], ok)
+		}
+	}
+	for _, k := range []string{"analysis", "plan", "validation"} {
+		if _, ok := empty[k]; ok {
+			t.Errorf("%s payload must be absent when not present", k)
+		}
+	}
+	withA := statusView(analyze.Analysis{}, true, hplan.Plan{}, false, verify.Validation{}, false)
+	if withA["have_analysis"] != true {
+		t.Error("have_analysis must be true when analysis is present")
+	}
+	if _, ok := withA["analysis"]; !ok {
+		t.Error("analysis payload must be present when haveA")
+	}
+}
