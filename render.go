@@ -155,7 +155,13 @@ func printStatus(root string, a analyze.Analysis, haveA bool, p hplan.Plan, have
 		fmt.Printf("  analysis : %d findings, overall %d/100 (%s)\n", a.Summary.Findings, a.Scores.Overall, a.GeneratedAt)
 	}
 	if haveP {
-		fmt.Printf("  plan     : %d refactor items (%s)\n", len(p.Items), p.GeneratedAt)
+		stale := ""
+		// p.AnalysisAt records the analysis the plan was built from; if the on-disk
+		// analysis has since been re-run, the displayed scores no longer match the plan.
+		if haveA && p.AnalysisAt != "" && p.AnalysisAt != a.GeneratedAt {
+			stale = "  ⚠ stale: analysis changed since this plan — re-run `humify plan`"
+		}
+		fmt.Printf("  plan     : %d refactor items (%s)%s\n", len(p.Items), p.GeneratedAt, stale)
 	}
 	if haveV {
 		fmt.Printf("  verify   : %s (%s)\n", verifyVerdict(v), v.GeneratedAt)
