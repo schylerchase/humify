@@ -155,6 +155,77 @@ func TestUntangleRunE2E(t *testing.T) {
 	})
 }
 
+// TestVerifyBaselineExitCodesE2E is the load-bearing guard for baseline-aware
+// verify: the entire feature is the exit-code contract, and only an end-to-end run
+// against a real toolchain proves it. A unit test mocking Validation cannot catch a
+// regression where `len(newly) > 0` is flipped, the no-baseline fallthrough breaks,
+// or an indeterminate kind leaks into "newly". Drives the real CLI on tiny Go
+// modules so `go build` is the genuine discriminator.
+func TestVerifyBaselineExitCodesE2E(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("verify shells out to the go toolchain POSIX-style; e2e is POSIX-only")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	const green = "package main\n\nfunc main() { _ = add(1, 2) }\nfunc add(a, b int) int { return a + b }\n"
+	newRepo := func(t *testing.T, mainGo string) string {
+		t.Helper()
+		root := t.TempDir()
+		mustWrite(t, filepath.Join(root, "go.mod"), "module smoke\n\ngo 1.26\n")
+		mustWrite(t, filepath.Join(root, "main.go"), mainGo)
+		for _, a := range [][]string{
+			{"init"}, {"config", "user.email", "e@x.t"}, {"config", "user.name", "t"},
+			{"config", "commit.gpgsign", "false"}, {"add", "-A"}, {"commit", "-m", "init"},
+		} {
+			runGit(t, root, a...)
+		}
+		return root
+	}
+
+	t.Run("regression: green baseline then break -> exit 2, newly failed", func(t *testing.T) {
+		root := newRepo(t, green)
+		if code, out := runHumify(t, "verify", "--save-baseline", "--no-coverage", root); code != exitOK {
+			t.Fatalf("save-baseline on a green tree must be exit 0, got %d:\n%s", code, out)
+		}
+		mustWrite(t, filepath.Join(root, "main.go"),
+			"package main\n\nfunc main() { _ = add(1, 2) }\nfunc add(a, b int) int { return a + b   \n") // missing brace
+		code, out := runHumify(t, "verify", "--baseline", "--no-coverage", root)
+		if code != exitDrift {
+			t.Fatalf("a self-caused regression must exit 2 (drift), got %d:\n%s", code, out)
+		}
+		if !strings.Contains(out, "newly failed") {
+			t.Fatalf("regression output must name newly-failed kinds:\n%s", out)
+		}
+	})
+
+	t.Run("ambient: red baseline then cosmetic edit -> exit 0, already failing", func(t *testing.T) {
+		root := newRepo(t, "package main\n\nfunc main() { _ = missing() }\n") // build already broken
+		if code, out := runHumify(t, "verify", "--save-baseline", "--no-coverage", root); code != exitOK {
+			t.Fatalf("save-baseline must exit 0 even on an ambient-red tree, got %d:\n%s", code, out)
+		}
+		mustWrite(t, filepath.Join(root, "main.go"), "package main\n\n// touch\nfunc main() { _ = missing() }\n")
+		code, out := runHumify(t, "verify", "--baseline", "--no-coverage", root)
+		if code != exitOK {
+			t.Fatalf("an ambient failure that predates the change must NOT exit 2, got %d:\n%s", code, out)
+		}
+		if !strings.Contains(out, "already failing") {
+			t.Fatalf("ambient output must mark the failure as pre-existing:\n%s", out)
+		}
+	})
+
+	t.Run("no baseline -> loud degrade, plain exit", func(t *testing.T) {
+		root := newRepo(t, green)
+		code, out := runHumify(t, "verify", "--baseline", "--no-coverage", root)
+		if code != exitOK {
+			t.Fatalf("no-baseline on a green tree falls through to plain verify (exit 0), got %d:\n%s", code, out)
+		}
+		if !strings.Contains(out, "--save-baseline") {
+			t.Fatalf("the no-baseline degrade must name --save-baseline:\n%s", out)
+		}
+	})
+}
+
 // buildFakeAgent compiles testdata/fakeagent into a binary that outlives the
 // subtests (built in the parent test's temp dir).
 func buildFakeAgent(t *testing.T) string {
