@@ -77,7 +77,7 @@ func nameFindings(path, lang string, infos []lineInfo, raw []string) []Finding {
 		out = append(out, Finding{
 			Category: "readability", Signal: SignalVagueName, File: path, Line: i + 1,
 			Severity: "info", Risk: "low", Evidence: strings.TrimSpace(raw[i]),
-			Detail:   fmt.Sprintf("The name %q does not say what it is or does; rename it for the concept it represents.", mtch[1]),
+			Detail: fmt.Sprintf("The name %q does not say what it is or does; rename it for the concept it represents.", mtch[1]),
 		})
 	}
 	return out
@@ -87,24 +87,32 @@ var (
 	// A real leftover marker (TODO/FIXME/XXX/HACK) either leads the comment text
 	// or is tag-punctuated — the keyword immediately followed by a colon or open
 	// paren. A bare mention of the word mid-sentence is prose, not a marker.
-	todoLeadRe    = regexp.MustCompile(`^(TODO|FIXME|XXX|HACK)\b`)
-	todoTagRe     = regexp.MustCompile(`\b(TODO|FIXME|XXX|HACK)\s*[:(]`)
-	emptyCatchRe  = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*\}`)
-	catchOpenRe   = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*$`)
-	bareExceptRe  = regexp.MustCompile(`^\s*except\s*:\s*$`)
-	broadExceptRe = regexp.MustCompile(`^\s*except\s+(?:Exception|BaseException)\b`)
+	todoLeadRe = regexp.MustCompile(`^(TODO|FIXME|XXX|HACK)\b`)
+	todoTagRe  = regexp.MustCompile(`\b(TODO|FIXME|XXX|HACK)\s*[:(]`)
+	// A marker is a DOCUMENTED deferral (not low-information slop) when it carries a
+	// tracked reference: a GitHub-style issue (#NN — 2+ digits, so "case #2" stays a
+	// section ref) or a URL (anchored on "://", so prose like "before https is
+	// reached" is not one). These are the crisp, non-gameable signals. Bare JIRA
+	// keys ([A-Z]+-N) are deliberately excluded — they collide with UTF-8 / SHA-1 —
+	// as is word count, which the corpus showed is a poor proxy (wordy ≠ concrete).
+	todoIssueRefRe = regexp.MustCompile(`#\d{2,}`)
+	todoURLRe      = regexp.MustCompile(`https?://`)
+	emptyCatchRe   = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*\}`)
+	catchOpenRe    = regexp.MustCompile(`catch\s*(?:\([^)]*\))?\s*\{\s*$`)
+	bareExceptRe   = regexp.MustCompile(`^\s*except\s*:\s*$`)
+	broadExceptRe  = regexp.MustCompile(`^\s*except\s+(?:Exception|BaseException)\b`)
 	// Brace-language broad (catch-all) handlers. The leading (?:^|[^.\w]) keeps a
 	// statement catch distinct from a method call like promise.catch(...).
-	jsCatchRe        = regexp.MustCompile(`(?:^|[^.\w])catch\s*(?:\([^)]*\))?\s*\{`)                                          // JS/TS: any catch is catch-all
+	jsCatchRe        = regexp.MustCompile(`(?:^|[^.\w])catch\s*(?:\([^)]*\))?\s*\{`)                                                             // JS/TS: any catch is catch-all
 	braceBroadTypeRe = regexp.MustCompile(`(?:^|[^.\w])catch\s*\(\s*(?:final\s+)?(?:System\.)?(?:Exception|Throwable|RuntimeException|Error)\b`) // Java/C#
-	braceBareCatchRe = regexp.MustCompile(`(?:^|[^.\w])catch\s*\{`)                                                          // C# catch-all `catch {`
-	cppCatchAllRe    = regexp.MustCompile(`(?:^|[^.\w])catch\s*\(\s*\.\.\.\s*\)`)                                            // C++ catch(...)
+	braceBareCatchRe = regexp.MustCompile(`(?:^|[^.\w])catch\s*\{`)                                                                              // C# catch-all `catch {`
+	cppCatchAllRe    = regexp.MustCompile(`(?:^|[^.\w])catch\s*\(\s*\.\.\.\s*\)`)                                                                // C++ catch(...)
 	// Matches an err-check opening line, with or without a leading short-var/
 	// assignment header (`if err := g(); err != nil {`). `err` stays hardcoded.
-	goErrIfRe = regexp.MustCompile(`^\s*if\s+(?:[^;{]*;\s*)?err\s*!=\s*nil\s*\{\s*$`)
-	identRe       = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
-	suppressRe    = regexp.MustCompile(`(?i)\b(?:noqa|nolint|eslint-disable)\b`)
-	dividerRunRe  = regexp.MustCompile(`[-=#*~]{3,}`)
+	goErrIfRe    = regexp.MustCompile(`^\s*if\s+(?:[^;{]*;\s*)?err\s*!=\s*nil\s*\{\s*$`)
+	identRe      = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+	suppressRe   = regexp.MustCompile(`(?i)\b(?:noqa|nolint|eslint-disable)\b`)
+	dividerRunRe = regexp.MustCompile(`[-=#*~]{3,}`)
 )
 
 // contentFindings scans the scanned lines for swallowed errors, broad catches,
@@ -176,13 +184,27 @@ func contentFindings(path, lang string, infos []lineInfo, raw []string) []Findin
 // is the text after the line-comment leader, so it may retain leading whitespace.
 func todoMarker(comment string) string {
 	body := strings.TrimLeft(comment, " \t*-")
-	if m := todoLeadRe.FindStringSubmatch(body); m != nil {
-		return m[1]
+	var kw string
+	switch {
+	case todoLeadRe.MatchString(body):
+		kw = todoLeadRe.FindStringSubmatch(body)[1]
+	case todoTagRe.MatchString(comment):
+		kw = todoTagRe.FindStringSubmatch(comment)[1]
+	default:
+		return ""
 	}
-	if m := todoTagRe.FindStringSubmatch(comment); m != nil {
-		return m[1]
+	if documentedDeferral(comment) {
+		return "" // tracked deferral (issue ref or URL) — already documented, not slop
 	}
-	return ""
+	return kw
+}
+
+// documentedDeferral reports whether a marker comment carries a tracked reference
+// that makes it a deliberate, documented deferral rather than a low-information
+// leftover: a GitHub-style issue number or a URL. Markers like "// TODO: see #42"
+// or "// FIXME: blocked on https://…" are exempt; bare or vague markers are not.
+func documentedDeferral(comment string) bool {
+	return todoIssueRefRe.MatchString(comment) || todoURLRe.MatchString(comment)
 }
 
 // swallowed builds the standard swallowed-error finding.

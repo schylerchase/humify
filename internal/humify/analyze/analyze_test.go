@@ -318,7 +318,7 @@ func TestTodoInStringIsNotFlagged(t *testing.T) {
 func TestEmptyFileNotFlaggedStale(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "pkg/__init__.py", "") // empty but significant — must NOT be stale
-	writeFile(t, root, "old.bak", "x\n")       // throwaway — must be stale
+	writeFile(t, root, "old.bak", "x\n")      // throwaway — must be stale
 	a, err := Run(root, Defaults())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -359,6 +359,45 @@ func TestTodoProseMentionNotFlagged(t *testing.T) {
 	} {
 		if !signalSet(inspectSrc("p.go", "go", src))["todo_marker"] {
 			t.Errorf("a real marker must still be flagged: %q", src)
+		}
+	}
+}
+
+// TestTodoMarkerSkipsDocumentedDeferrals covers blind-canary finding (b): the old
+// detector cried wolf on already-tracked deferrals. A marker carrying a tracked
+// reference — a GitHub-style issue (#NN, 2+ digits so "case #2" stays a section
+// ref) or a URL (anchored on "://", so prose like "before https is reached" is not
+// one) — is exempt. Bare/vague markers, owner-tags without a ref, and wordy-but-
+// vague reasons still fire. (Word-count and bare JIRA keys were deliberately NOT
+// used: the corpus showed wordy markers can be vague, and [A-Z]+-N collides with
+// UTF-8 / SHA-1.)
+func TestTodoMarkerSkipsDocumentedDeferrals(t *testing.T) {
+	fires := func(comment string) bool {
+		src := "package x\n\n" + comment + "\nvar y = 1\n"
+		return signalSet(inspectSrc("p.go", "go", src))["todo_marker"]
+	}
+	for _, c := range []string{
+		"// TODO: blocked on app-core.js modularization, see #42",
+		"// TODO(#123): drop the shim after the migration",
+		"// FIXME #88",
+		"// TODO: refactor once the auth migration in #1423 lands",
+		"// FIXME: blocked on upstream bug https://example.com/issues/9",
+		"// HACK: workaround for a browser quirk, see http://bugs.example/x",
+	} {
+		if fires(c) {
+			t.Errorf("a documented deferral (issue ref / URL) must be exempt: %q", c)
+		}
+	}
+	for _, c := range []string{
+		"// TODO",
+		"// FIXME: fix this",
+		"// TODO: refactor this method to be cleaner and more readable",
+		"// TODO(alice): wire up the retry path",
+		"// TODO: handle the empty case #2 from the spec",      // "#2" is a section ref, not an issue
+		"// FIXME handler returns nil before https is reached", // "https" without :// is prose
+	} {
+		if !fires(c) {
+			t.Errorf("a bare/vague marker (no tracked ref) must still fire: %q", c)
 		}
 	}
 }
