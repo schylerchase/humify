@@ -21,6 +21,8 @@ const (
 	PlanFile       = "plan.json"
 	ValidationFile = "validation.json"
 	CoverageFile   = "coverage.json"
+	// BaselineFile holds the saved pre-edit verify snapshot for `verify --baseline`.
+	BaselineFile = "verify-baseline.json"
 	// DeleteMeDir holds files apply has quarantined, namespaced per plan item.
 	DeleteMeDir = "delete-me"
 )

@@ -27,6 +27,89 @@ func captureStatus(t *testing.T, a analyze.Analysis, haveA bool, p hplan.Plan, h
 	return string(out)
 }
 
+// capture runs fn with stdout redirected and returns what it printed.
+func capture(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+func vCmd(kind string, passed bool, exit int) verify.CmdResult {
+	return verify.CmdResult{Kind: kind, Command: kind + " cmd", Ran: true, Passed: passed, ExitCode: exit}
+}
+
+func vReport(cmds ...verify.CmdResult) verify.Validation {
+	v := verify.Validation{Commands: cmds, Validated: len(cmds) > 0, Passed: true}
+	for _, c := range cmds {
+		if c.Ran && !c.Passed {
+			v.Passed = false
+		}
+	}
+	return v
+}
+
+// TestPrintBaselineDelta_NamesRegression: a kind that passed in the baseline and
+// cleanly fails after the edit is the AI's regression — it must be named as such,
+// not waved through as ambient.
+func TestPrintBaselineDelta_NamesRegression(t *testing.T) {
+	snap := verify.BaselineSnapshot{Result: vReport(vCmd("test", true, 0))}
+	post := vReport(vCmd("test", false, 1))
+	out := capture(t, func() { printBaselineDelta(post, snap, false) })
+	low := strings.ToLower(out)
+	if !strings.Contains(low, "newly failed") {
+		t.Errorf("a previously-passing kind that now fails must be named a regression:\n%s", out)
+	}
+	if !strings.Contains(low, "your change") && !strings.Contains(low, "caused by") {
+		t.Errorf("regression must be attributed to the change, not ambient:\n%s", out)
+	}
+}
+
+// TestPrintBaselineDelta_AmbientNotBlamed is the exact confusion the blind canary
+// hit: a check failing in a deps-less checkout was indistinguishable from a
+// regression. A pre-existing failure must read as ambient, never as the change.
+func TestPrintBaselineDelta_AmbientNotBlamed(t *testing.T) {
+	snap := verify.BaselineSnapshot{Result: vReport(vCmd("build", false, 1))}
+	post := vReport(vCmd("build", false, 1))
+	out := capture(t, func() { printBaselineDelta(post, snap, false) })
+	low := strings.ToLower(out)
+	if !strings.Contains(low, "already failing") && !strings.Contains(low, "ambient") {
+		t.Errorf("a pre-existing failure must be marked ambient:\n%s", out)
+	}
+	if strings.Contains(low, "newly failed") {
+		t.Errorf("an ambient failure must NOT be reported as newly failed:\n%s", out)
+	}
+}
+
+// TestPrintBaselineDelta_IndeterminateShown: Delta drops ExitCode<0 kinds, so the
+// renderer must surface them explicitly or a flaky/uninstalled command silently
+// vanishes and the report reads as clean.
+func TestPrintBaselineDelta_IndeterminateShown(t *testing.T) {
+	snap := verify.BaselineSnapshot{Result: vReport(vCmd("test", true, 0))}
+	post := vReport(vCmd("test", false, -1)) // timed out / failed to launch
+	out := capture(t, func() { printBaselineDelta(post, snap, false) })
+	if !strings.Contains(strings.ToLower(out), "could not compare") {
+		t.Errorf("an indeterminate post kind must be surfaced, not dropped:\n%s", out)
+	}
+}
+
+// TestPrintNoBaselineIsLoud: a quiet degrade is the original gap wearing a success
+// message. The no-baseline path must tell the caller to capture one first.
+func TestPrintNoBaselineIsLoud(t *testing.T) {
+	out := capture(t, func() { printNoBaseline() })
+	if !strings.Contains(out, "--save-baseline") {
+		t.Errorf("the no-baseline degrade must name --save-baseline:\n%s", out)
+	}
+}
+
 // TestPrintStatus_FlagsStalePlan covers ROADMAP #10: plan.AnalysisAt was written but
 // read nowhere, so a plan built from an analysis that has since been re-run showed
 // its scores next to a stale plan with no warning.

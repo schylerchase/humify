@@ -45,6 +45,45 @@ func TestBuildRanksQuarantineFirst(t *testing.T) {
 	}
 }
 
+// TestValidationStrategyByBehaviorClass covers blind-canary finding (a) + the
+// baseline-aware verify breadcrumb: a behavior-preserving item (noisy_comment) is
+// confirmed by re-analyzing, while a behavior-changing item (swallowed_error)
+// steers to the two-step baseline flow in BEFORE→AFTER order. The baseline flags
+// must stay OUT of AgentSpec, which is piped verbatim to a spawned agent humify
+// already brackets with its own baseline/post.
+func TestValidationStrategyByBehaviorClass(t *testing.T) {
+	a := analyze.Analysis{Findings: []analyze.Finding{
+		{Signal: "noisy_comment", Severity: "warning", File: "a.go", Line: 3},
+		{Signal: "swallowed_error", Severity: "major", File: "b.go", Line: 5},
+	}}
+	p := Build(a)
+
+	nc, ok := findSignal(p, "noisy_comment")
+	if !ok {
+		t.Fatal("expected a noisy_comment item")
+	}
+	if !strings.Contains(nc.ValidationStrategy, "analyze") {
+		t.Errorf("behavior-preserving item should validate via analyze: %q", nc.ValidationStrategy)
+	}
+	if strings.Contains(nc.ValidationStrategy, "--baseline") {
+		t.Errorf("behavior-preserving item must not steer to verify --baseline: %q", nc.ValidationStrategy)
+	}
+
+	se, ok := findSignal(p, "swallowed_error")
+	if !ok {
+		t.Fatal("expected a swallowed_error item")
+	}
+	if !strings.Contains(se.ValidationStrategy, "--save-baseline") || !strings.Contains(se.ValidationStrategy, "--baseline") {
+		t.Errorf("behavior-changing item must steer to the two-step baseline flow: %q", se.ValidationStrategy)
+	}
+	if strings.Index(se.ValidationStrategy, "BEFORE") > strings.Index(se.ValidationStrategy, "AFTER") {
+		t.Errorf("the save step (BEFORE) must precede the compare step (AFTER): %q", se.ValidationStrategy)
+	}
+	if strings.Contains(se.AgentSpec, "--save-baseline") || strings.Contains(se.AgentSpec, "--baseline") {
+		t.Errorf("AgentSpec must not carry baseline flags — it is piped to a spawned agent humify already brackets: %q", se.AgentSpec)
+	}
+}
+
 func TestBuildAssignsSequentialIDs(t *testing.T) {
 	a := analyze.Analysis{Findings: []analyze.Finding{
 		{Signal: "stale_file", Severity: "warning", File: "x.bak"},

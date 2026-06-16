@@ -237,23 +237,6 @@ func TestGate(t *testing.T) {
 	}
 }
 
-func TestComputeDelta(t *testing.T) {
-	if a, n, f := computeDelta(val(cfail("test")), val(cpass("test"))); !sameKinds(f, []string{"test"}) || len(a)+len(n) != 0 {
-		t.Errorf("cleanfail→pass should be fixed only; got already=%v newly=%v fixed=%v", a, n, f)
-	}
-	if a, n, f := computeDelta(val(cpass("test")), val(cfail("test"))); !sameKinds(n, []string{"test"}) || len(a)+len(f) != 0 {
-		t.Errorf("pass→cleanfail should be newly-failing only; got already=%v newly=%v fixed=%v", a, n, f)
-	}
-	if a, n, f := computeDelta(val(cfail("test")), val(cfail("test"))); !sameKinds(a, []string{"test"}) || len(n)+len(f) != 0 {
-		t.Errorf("cleanfail→cleanfail should be already-failing only; got already=%v newly=%v fixed=%v", a, n, f)
-	}
-	// The honesty fix: an indeterminate baseline that then passes is NOT "fixed"
-	// (it was never known to be failing).
-	if a, n, f := computeDelta(val(cindet("test")), val(cpass("test"))); len(a)+len(n)+len(f) != 0 {
-		t.Errorf("indeterminate→pass must classify as nothing; got already=%v newly=%v fixed=%v", a, n, f)
-	}
-}
-
 func TestApplyValidationNote(t *testing.T) {
 	// An indeterminate baseline must never be described as "already failing".
 	if note := applyValidationNote(val(cindet("test")), val(cpass("test"))); strings.Contains(note, "already failing") {

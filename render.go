@@ -93,7 +93,7 @@ func printPlan(p hplan.Plan) {
 	if firstApplyable != "" {
 		fmt.Printf("\nnext: humify apply --target %s --dry-run\n", firstApplyable)
 	} else {
-		fmt.Println("\nnext: address the highest-ranked item by hand, then `humify verify`")
+		fmt.Println("\nnext: capture a baseline with `humify verify --save-baseline`, address the highest-ranked item, then `humify verify --baseline` to confirm no regression (see each item's validation strategy).")
 	}
 }
 
@@ -118,6 +118,81 @@ func printValidation(v verify.Validation) {
 	default:
 		fmt.Println("overall: FAILED (see .humify/validation.json)")
 	}
+}
+
+// printBaselineDelta renders a baseline→post comparison: which kinds the change
+// broke (regression), which were already failing (ambient), which it fixed, and
+// which could not be compared. This is the read-only `verify --baseline` answer
+// to the blind-canary gap — telling a self-caused regression from an ambient
+// failure that was already red before the edit.
+func printBaselineDelta(post verify.Validation, snap verify.BaselineSnapshot, stale bool) {
+	fmt.Printf("Humify verify --baseline — %s\n", post.Target)
+	printBaselineWarnings(snap, stale)
+	already, newly, fixed := verify.Delta(snap.Result, post)
+	indet := indeterminateKinds(post)
+	printDeltaLine("✗ newly failed (caused by your change since the baseline)", newly)
+	printDeltaLine("• already failing before your change (ambient — run `humify doctor`)", already)
+	printDeltaLine("✓ fixed by this change", fixed)
+	printDeltaLine("? could not compare (timed out or failed to launch)", indet)
+	fmt.Println(baselineOverall(newly, indet))
+}
+
+// printBaselineWarnings surfaces the two ways a saved baseline can mislead: it
+// predates a commit, or it was captured on an already-dirty tree.
+func printBaselineWarnings(snap verify.BaselineSnapshot, stale bool) {
+	if stale {
+		fmt.Println("  ⚠  baseline predates a commit (HEAD moved since save) — re-run `humify verify --save-baseline`.")
+	}
+	if snap.Dirty {
+		fmt.Println("  ⚠  baseline was saved on a dirty tree, so it may already contain edits — a real regression can then read as ambient.")
+	}
+}
+
+func printDeltaLine(label string, kinds []string) {
+	if len(kinds) > 0 {
+		fmt.Printf("  %s: %s\n", label, strings.Join(kinds, ", "))
+	}
+}
+
+func baselineOverall(newly, indet []string) string {
+	switch {
+	case len(newly) > 0:
+		return "overall: REGRESSED — your change broke a previously-passing check."
+	case len(indet) > 0:
+		return "overall: INCONCLUSIVE — some checks could not be compared (see above)."
+	default:
+		return "overall: no regression from your change."
+	}
+}
+
+// indeterminateKinds returns post kinds that ran but produced no clean status
+// (ExitCode < 0: timed out or failed to launch). Delta drops these, so the
+// baseline renderer surfaces them separately rather than letting them vanish and
+// read as clean.
+func indeterminateKinds(post verify.Validation) []string {
+	var out []string
+	for _, c := range post.Commands {
+		if c.Ran && !c.Passed && c.ExitCode < 0 {
+			out = append(out, c.Kind)
+		}
+	}
+	return out
+}
+
+// printBaselineSaved confirms where the baseline was written and steers to the
+// post-edit step. A dirty tree at save time is the dangerous ordering mistake, so
+// it warns loudly.
+func printBaselineSaved(snap verify.BaselineSnapshot) {
+	fmt.Printf("Baseline saved to .humify/%s — make your edits, then run `humify verify --baseline`.\n", hstate.BaselineFile)
+	if snap.Dirty {
+		fmt.Println("⚠  the tree was already dirty when this baseline was captured. Save the baseline BEFORE editing, or it will contain your edits and hide regressions.")
+	}
+}
+
+// printNoBaseline is the loud degrade when `--baseline` finds no saved snapshot —
+// a quiet fall-through would be the original gap wearing a success message.
+func printNoBaseline() {
+	fmt.Println("No saved baseline — cannot compare. Run `humify verify --save-baseline` BEFORE editing, then `humify verify --baseline` after. Falling back to a plain run:")
 }
 
 // printApply renders the outcome of an apply.

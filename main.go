@@ -54,6 +54,8 @@ type options struct {
 	execute          bool // untangle run: opt in to the source-modifying execute stage
 	unsafePermission bool // apply: unlock autonomous agent execution for manual/assisted items
 	noCoverage       bool // verify: skip coverage instrumentation
+	saveBaseline     bool // verify: capture a pre-edit baseline snapshot
+	baseline         bool // verify: compare against the saved baseline (regression vs ambient)
 }
 
 const defaultGodLOC = 1500
@@ -178,6 +180,10 @@ func parseArgs(args []string) (string, options) {
 			opts.unsafePermission = true
 		case a == "--no-coverage":
 			opts.noCoverage = true
+		case a == "--save-baseline":
+			opts.saveBaseline = true
+		case a == "--baseline":
+			opts.baseline = true
 		case name == "--path":
 			opts.path = value()
 		case name == "--root":
@@ -352,7 +358,7 @@ func printUsage() {
 usage:
   humify analyze [PATH] [--config=FILE] [--markdown] [--json]
   humify plan    [PATH] [--markdown] [--json]
-  humify verify  [PATH] [--json]
+  humify verify  [PATH] [--save-baseline | --baseline] [--json]
   humify status  [PATH] [--json]
   humify doctor  [PATH] [--json]
   humify apply   --target HMF-### [--dry-run | --yes] [PATH]
@@ -371,6 +377,10 @@ plan     rank the findings into prioritized HMF-### refactor items with evidence
          Runs analyze first if no analysis exists. Read-only.
 verify   detect and run the project's safe validation commands (test/build/lint/
          typecheck) and record results in .humify/validation.json.
+         For an AI editing the tree: run "verify --save-baseline" BEFORE editing,
+         then "verify --baseline" after — the second run reports which checks your
+         change broke (regression, exit 2) vs which were already failing (ambient),
+         so a deps-less red checkout is never mistaken for a regression you caused.
 status   print the current analysis/plan/validation state from .humify/ JSON.
 doctor   check Humify's wiring, the target path, git state, and tool availability.
 apply    the only command that changes source — and only conservatively. Defaults

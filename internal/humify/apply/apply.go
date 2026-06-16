@@ -174,11 +174,11 @@ func performQuarantine(root string, item plan.Item, moves []FileMove, now time.T
 func performAgentApply(root string, item plan.Item, agentCmd string, now time.Time) (Result, error) {
 	res := Result{ItemID: item.ID, Action: "agent", Applied: false}
 
-	head, ok := gitHead(root)
+	head, ok := verify.GitHead(root)
 	if !ok {
 		return res, fmt.Errorf("agent apply needs a git repository with at least one commit — git is its only rollback. Commit your work (or run `git init` and commit), or address %s by hand", item.ID)
 	}
-	if repoDirtyExcludingHumify(root) {
+	if verify.RepoDirtyExcludingHumify(root) {
 		res.RepoDirty = true
 		return res, fmt.Errorf("agent apply refuses to run on a dirty working tree — uncommitted changes can't be separated from the agent's edits on rollback. Commit or stash first, then retry")
 	}
@@ -222,7 +222,7 @@ func performAgentApply(root string, item plan.Item, agentCmd string, now time.Ti
 // commit it is restorable to plus the validation outcome. The agent path has no file
 // moves, so Files is empty.
 func writeAgentManifest(root string, item plan.Item, baseSHA string, baseline, post verify.Validation) (string, error) {
-	already, newly, fixed := computeDelta(baseline, post)
+	already, newly, fixed := verify.Delta(baseline, post)
 	man := Manifest{
 		Schema: state.Schema, Tool: "humify", PlanItem: item.ID,
 		Timestamp: post.GeneratedAt, BaseSHA: baseSHA, Verification: item.Verification,
@@ -326,7 +326,7 @@ func restore(moves []FileMove) error {
 
 // writeManifest records the quarantine so it is auditable and reversible.
 func writeManifest(root string, item plan.Item, moves []FileMove, baseline, post verify.Validation) (string, error) {
-	already, newly, fixed := computeDelta(baseline, post)
+	already, newly, fixed := verify.Delta(baseline, post)
 	man := Manifest{
 		Schema: state.Schema, Tool: "humify", PlanItem: item.ID,
 		Timestamp:    post.GeneratedAt,
@@ -442,48 +442,12 @@ func gitDirty(root string) bool {
 	return err == nil && strings.TrimSpace(string(out)) != ""
 }
 
-// gitHead returns the current commit SHA, and false if root is not a git repo or has
-// no commits — in which case the agent path has no commit to roll back to.
-func gitHead(root string) (string, bool) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSpace(string(out)), true
-}
-
 // shortSHA trims a commit SHA for display.
 func shortSHA(s string) string {
 	if len(s) > 12 {
 		return s[:12]
 	}
 	return s
-}
-
-// repoDirtyExcludingHumify reports uncommitted changes OUTSIDE .humify/. humify's
-// own state dir (analysis, plan, quarantine, resume state) is created by the tool
-// itself and must not count as user dirt that blocks the agent path — otherwise
-// `humify plan` would leave untracked JSON that makes every agent apply refuse.
-func repoDirtyExcludingHumify(root string) bool {
-	cmd := exec.Command("git", "status", "--porcelain")
-	cmd.Dir = root
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if len(line) < 4 {
-			continue
-		}
-		path := strings.TrimSpace(line[3:]) // porcelain: "XY <path>"
-		if path == state.Dir || strings.HasPrefix(path, state.Dir+"/") {
-			continue
-		}
-		return true
-	}
-	return false
 }
 
 // gitRestore returns the working tree to sha: tracked files via `reset --hard`, and
@@ -504,47 +468,6 @@ func gitRestore(root, sha string) error {
 	return nil
 }
 
-// computeDelta classifies kinds into already-failing (cleanly failed before and
-// after), newly-failing (regression — passed before, cleanly failed after), and
-// fixed (cleanly failed before, passed after). "Failed" means a clean fail
-// (ExitCode >= 0); an indeterminate result (timeout/launch error, ExitCode < 0) is
-// deliberately NOT counted as a failure here, so a baseline that merely timed out
-// is never reported as "already failing". The gate rolls indeterminate post kinds
-// back, so this success-path summary never has to describe one.
-func computeDelta(baseline, post verify.Validation) (alreadyFailing, newlyFailing, fixed []string) {
-	basePassed := map[string]bool{}
-	baseCleanFail := map[string]bool{}
-	for _, c := range baseline.Commands {
-		if !c.Ran {
-			continue
-		}
-		switch {
-		case c.Passed:
-			basePassed[c.Kind] = true
-		case c.ExitCode >= 0:
-			baseCleanFail[c.Kind] = true
-		}
-	}
-	for _, c := range post.Commands {
-		if !c.Ran {
-			continue
-		}
-		switch {
-		case c.Passed:
-			if baseCleanFail[c.Kind] {
-				fixed = append(fixed, c.Kind)
-			}
-		case c.ExitCode >= 0: // clean fail
-			if basePassed[c.Kind] {
-				newlyFailing = append(newlyFailing, c.Kind)
-			} else if baseCleanFail[c.Kind] {
-				alreadyFailing = append(alreadyFailing, c.Kind)
-			}
-		}
-	}
-	return alreadyFailing, newlyFailing, fixed
-}
-
 // applyValidationNote produces a delta-aware summary for human output. It
 // distinguishes pre-existing failures from new regressions so users are not
 // misled by failures that existed before the change.
@@ -552,7 +475,7 @@ func applyValidationNote(baseline, post verify.Validation) string {
 	if !post.Validated {
 		return "No validation commands detected — the change could not be auto-verified."
 	}
-	already, newly, fixed := computeDelta(baseline, post)
+	already, newly, fixed := verify.Delta(baseline, post)
 	if len(newly) > 0 {
 		// Should not reach here (gate() returns gateRegressed and the change is
 		// rolled back before this note is rendered), but be honest if it does.

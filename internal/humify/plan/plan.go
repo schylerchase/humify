@@ -58,6 +58,7 @@ type signalDescriptor struct {
 	risk, safety                         string
 	action                               string
 	applyable                            bool
+	behaviorPreserving                   bool   // change cannot regress behavior; confirm via re-analyze, not verify
 	tier                                 int    // ordering rank; lower runs first
 	instruction                          string // agent transformation rule (non-safe signals only)
 }
@@ -85,7 +86,7 @@ var descriptors = map[string]signalDescriptor{
 		risk:    "low", safety: "safe",
 	},
 	analyze.SignalSwallowedError: {
-		title:   "Stop swallowing errors", tier: 2,
+		title: "Stop swallowing errors", tier: 2,
 		problem: "Errors are caught and discarded, so real failures pass silently.",
 		why:     "Silent failure is the most expensive class of bug to diagnose in production.",
 		change:  "Handle, wrap with context, or at minimum log each swallowed error.",
@@ -94,7 +95,7 @@ var descriptors = map[string]signalDescriptor{
 		instruction: "Find each empty or near-empty error handler (empty catch block, `except: pass`, `if err != nil { }` with no body, etc.) and replace it with an action: return the error with context, log it and re-raise, or handle it explicitly. Never leave the handler empty. If you cannot determine the right action from context alone, add a log line and re-raise — that is always better than silence.",
 	},
 	analyze.SignalBroadCatch: {
-		title:   "Narrow broad exception handlers", tier: 2,
+		title: "Narrow broad exception handlers", tier: 2,
 		problem: "Catch-all handlers absorb errors the author never anticipated.",
 		why:     "A broad catch hides new failure modes behind code that looks defensive.",
 		change:  "Catch the specific exception you can handle; let the rest propagate.",
@@ -103,7 +104,7 @@ var descriptors = map[string]signalDescriptor{
 		instruction: "Find each broad exception handler (`except Exception`, `catch (Exception e)`, `rescue StandardError`, etc.) and narrow it to the specific exception type(s) the wrapped code can actually raise. Read the try/catch body to determine which exceptions are plausible. If multiple types are possible, catch each explicitly. Do not change the handler's body logic.",
 	},
 	analyze.SignalGiantFile: {
-		title:   "Split giant files", tier: 2,
+		title: "Split giant files", tier: 2,
 		problem: "Oversized files usually bundle several unrelated responsibilities.",
 		why:     "Large files are hard to navigate, review, and test as a unit.",
 		change:  "Separate the file by responsibility into cohesive, individually testable units.",
@@ -112,7 +113,7 @@ var descriptors = map[string]signalDescriptor{
 		instruction: "Separate the file by responsibility. Read the file, identify its distinct concerns, and extract each into its own file with a name that states its responsibility. Update all import sites. The original file should shrink to a thin facade or be deleted if it is fully superseded.",
 	},
 	analyze.SignalLongFunction: {
-		title:   "Break up long functions", tier: 2,
+		title: "Break up long functions", tier: 2,
 		problem: "Long functions perform many unrelated steps in one scope.",
 		why:     "A reader must hold the whole function in their head to change one line.",
 		change:  "Extract cohesive helpers with intention-revealing names.",
@@ -121,7 +122,7 @@ var descriptors = map[string]signalDescriptor{
 		instruction: "Extract cohesive sub-steps out of each long function into helpers with intention-revealing names. Each extracted helper should do exactly one thing and be nameable without 'and'. Do not change observable behavior — only reorganize structure.",
 	},
 	analyze.SignalDeepNesting: {
-		title:   "Flatten deep nesting", tier: 2,
+		title: "Flatten deep nesting", tier: 2,
 		problem: "Deeply nested control flow obscures the path a value takes.",
 		why:     "Each nesting level multiplies the states a reader must track.",
 		change:  "Use early returns and guard clauses to flatten the happy path.",
@@ -130,30 +131,30 @@ var descriptors = map[string]signalDescriptor{
 		instruction: "Flatten deeply nested control flow using early returns and guard clauses. The outermost happy path should be linear. Move the error/edge cases to the top so they return or raise early, leaving the main path unindented.",
 	},
 	analyze.SignalVagueName: {
-		title:   "Rename vague symbols", tier: 2,
+		title: "Rename vague symbols", tier: 2,
 		problem: "Names like data, manager, and helper hide what the code is for.",
 		why:     "A reader cannot trust code they cannot name.",
 		change:  "Rename to the concept the symbol represents, updating all references.",
 		benefit: "The code documents its own intent.",
-		risk:    "low", safety: "assisted",
+		risk:    "low", safety: "assisted", behaviorPreserving: true,
 		instruction: "Rename each vague symbol (data, manager, helper, result, info, obj, etc.) to a name that states what it represents in the domain. Update every reference. Do not rename symbols whose names are correct; only rename the ones listed in the evidence.",
 	},
 	analyze.SignalNoisyComment: {
-		title:   "Remove noise comments", tier: 2,
+		title: "Remove noise comments", tier: 2,
 		problem: "Comments that restate the code add maintenance cost and no information.",
 		why:     "Redundant comments drift out of sync and train readers to ignore comments.",
 		change:  "Delete restating comments; keep comments that explain the why.",
 		benefit: "Remaining comments are trustworthy and worth reading.",
-		risk:    "low", safety: "assisted",
+		risk:    "low", safety: "assisted", behaviorPreserving: true,
 		instruction: "Delete each comment that merely restates the code (e.g. `// increment i` above `i++`, `# call save` above `save()`). Keep comments that explain WHY, not WHAT. If a comment has useful intent buried in noise, rewrite it to the useful part only.",
 	},
 	analyze.SignalTodoMarker: {
-		title:   "Resolve leftover TODO/FIXME markers", tier: 2,
+		title: "Resolve leftover TODO/FIXME markers", tier: 2,
 		problem: "Unfinished markers signal abandoned or machine-stubbed work.",
 		why:     "Stale markers accumulate into uncertainty about what is actually done.",
 		change:  "Resolve each marker or convert it into a tracked issue, then remove it.",
 		benefit: "The code reflects finished work, not intentions.",
-		risk:    "low", safety: "manual",
+		risk:    "low", safety: "manual", behaviorPreserving: true,
 		instruction: "Resolve each TODO/FIXME/HACK marker. For each one: if the work is done, delete the marker. If it is genuinely outstanding, convert it to a specific issue reference or a concrete comment that names the constraint. Never leave a vague marker with no resolution path.",
 	},
 }
@@ -326,12 +327,21 @@ func evidenceFor(fs []analyze.Finding, modifiable map[string]bool) []string {
 	return out
 }
 
-// validationFor states how to confirm an item's change is behavior-preserving.
+// validationFor states how to confirm an item's change did no harm. The right
+// signal depends on the change class: a reversible quarantine just re-runs verify;
+// a behavior-preserving edit (comment/marker/rename) has no behavior to regress, so
+// the honest check is re-analyzing to confirm the finding cleared (verify would
+// pass either way and give false confidence); a behavior-changing edit uses the
+// baseline-aware two-step so an ambient red is never mistaken for a regression.
 func validationFor(d signalDescriptor) string {
-	if d.applyable {
+	switch {
+	case d.applyable:
 		return "Re-run `humify verify`; if any previously-passing check fails, restore the quarantined files."
+	case d.behaviorPreserving:
+		return "Re-run `humify analyze` and confirm this finding has cleared — that is the efficacy signal here. `humify verify` is not: there is no behavior to regress, so it would pass regardless."
+	default:
+		return "BEFORE editing, capture a baseline: `humify verify --save-baseline`. AFTER editing, compare: `humify verify --baseline` — it separates a regression your change caused from a check that was already failing (ambient)."
 	}
-	return "Add or confirm characterization tests, then re-run `humify verify` after the manual change."
 }
 
 // goalLine summarizes the plan's intent.

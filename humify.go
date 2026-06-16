@@ -93,9 +93,16 @@ func stampFromCoverage(p *hplan.Plan, cov verify.CoverageReport) {
 	}
 }
 
-// cmdVerify runs the project's detected validation commands.
+// cmdVerify runs the project's detected validation commands. With --save-baseline
+// it snapshots the result for a later comparison; with --baseline it diffs the
+// current run against that snapshot to separate a self-caused regression from an
+// ambient failure that was already red.
 func cmdVerify(opts options) int {
 	root := absTarget(opts)
+	// Measure dirtiness BEFORE running validation: verify's build can litter the
+	// tree (e.g. `go build ./...` drops a binary in cwd), so a post-run check would
+	// false-positive. This is the honest "was the tree dirty at invocation" signal.
+	preDirty := opts.saveBaseline && verify.RepoDirtyExcludingHumify(root)
 	v, err := verify.Run(root, time.Now())
 	if err != nil {
 		return fail(opts, "verify_error", exitError, "verify failed: "+err.Error())
@@ -107,6 +114,18 @@ func cmdVerify(opts options) int {
 		cov := verify.Coverage(root)
 		_ = hstate.Save(root, hstate.CoverageFile, cov)
 	}
+	switch {
+	case opts.saveBaseline:
+		return verifySaveBaseline(opts, root, v, preDirty)
+	case opts.baseline:
+		return verifyWithBaseline(opts, root, v)
+	default:
+		return verifyPlain(opts, v)
+	}
+}
+
+// verifyPlain is the unchanged single-snapshot behavior: report pass/fail.
+func verifyPlain(opts options, v verify.Validation) int {
 	if opts.json {
 		emitJSON(v)
 	} else {
@@ -116,6 +135,67 @@ func cmdVerify(opts options) int {
 		return exitDrift
 	}
 	return exitOK
+}
+
+// verifySaveBaseline persists v as the pre-edit baseline. It returns exitOK on a
+// successful capture regardless of pass/fail: an ambient-red baseline is expected
+// and must not block the AI's `--save-baseline && edit` step.
+func verifySaveBaseline(opts options, root string, v verify.Validation, dirty bool) int {
+	if err := verify.SaveBaseline(root, v, dirty, time.Now()); err != nil {
+		return fail(opts, "write_error", exitError, "could not write baseline: "+err.Error())
+	}
+	snap, _ := verify.LoadBaseline(root)
+	if opts.json {
+		emitJSON(snap)
+	} else {
+		printValidation(v)
+		printBaselineSaved(snap)
+	}
+	return exitOK
+}
+
+// verifyWithBaseline diffs the current run against the saved baseline. A
+// previously-passing kind that now cleanly fails is the change's regression
+// (exitDrift); anything already failing is ambient. With no saved baseline it
+// degrades loudly to a plain run.
+func verifyWithBaseline(opts options, root string, post verify.Validation) int {
+	snap, ok := verify.LoadBaseline(root)
+	if !ok {
+		if !opts.json {
+			printNoBaseline()
+		}
+		return verifyPlain(opts, post)
+	}
+	stale := verify.BaselineStale(snap, root)
+	_, newly, _ := verify.Delta(snap.Result, post)
+	if opts.json {
+		emitJSON(baselineResultOf(post, snap, stale))
+	} else {
+		printBaselineDelta(post, snap, stale)
+	}
+	if len(newly) > 0 {
+		return exitDrift
+	}
+	return exitOK
+}
+
+// baselineResult is the machine-readable --baseline verdict for AI callers.
+type baselineResult struct {
+	Post           verify.Validation `json:"post"`
+	AlreadyFailing []string          `json:"already_failing"`
+	NewlyFailing   []string          `json:"newly_failing"`
+	Fixed          []string          `json:"fixed"`
+	Indeterminate  []string          `json:"indeterminate"`
+	BaselineStale  bool              `json:"baseline_stale"`
+	BaselineDirty  bool              `json:"baseline_dirty_at_save"`
+}
+
+func baselineResultOf(post verify.Validation, snap verify.BaselineSnapshot, stale bool) baselineResult {
+	already, newly, fixed := verify.Delta(snap.Result, post)
+	return baselineResult{
+		Post: post, AlreadyFailing: already, NewlyFailing: newly, Fixed: fixed,
+		Indeterminate: indeterminateKinds(post), BaselineStale: stale, BaselineDirty: snap.Dirty,
+	}
 }
 
 // cmdApply executes one plan item — conservatively, defaulting to a dry run.
