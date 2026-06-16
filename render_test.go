@@ -110,6 +110,32 @@ func TestPrintNoBaselineIsLoud(t *testing.T) {
 	}
 }
 
+// TestAnalysisDeltaLine covers blind-canary finding (c): the headline health score
+// is correctly sticky for info-only fixes, so a resolved finding is invisible. A
+// since-last-analysis delta makes small wins legible — total findings plus only the
+// per-signal counts that changed.
+func TestAnalysisDeltaLine(t *testing.T) {
+	prior := analyze.Summary{Findings: 155, BySignal: map[string]int{"todo_marker": 4, "vague_name": 2, "long_function": 3}}
+	cur := analyze.Summary{Findings: 151, BySignal: map[string]int{"todo_marker": 0, "vague_name": 2, "long_function": 3}}
+	line := analysisDelta(prior, cur)
+	if !strings.Contains(line, "155") || !strings.Contains(line, "151") {
+		t.Errorf("delta must show the total findings change 155→151: %q", line)
+	}
+	if !strings.Contains(line, "todo_marker") || !strings.Contains(line, "4") {
+		t.Errorf("delta must name the changed signal todo_marker 4→0: %q", line)
+	}
+	if strings.Contains(line, "long_function") || strings.Contains(line, "vague_name") {
+		t.Errorf("unchanged signals must not appear in the delta: %q", line)
+	}
+}
+
+func TestAnalysisDeltaNoChange(t *testing.T) {
+	s := analyze.Summary{Findings: 10, BySignal: map[string]int{"todo_marker": 2}}
+	if got := analysisDelta(s, s); got != "" {
+		t.Errorf("identical summaries must yield no delta line, got %q", got)
+	}
+}
+
 // TestPrintStatus_FlagsStalePlan covers ROADMAP #10: plan.AnalysisAt was written but
 // read nowhere, so a plan built from an analysis that has since been re-run showed
 // its scores next to a stale plan with no warning.

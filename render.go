@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/schylerryan/humify/internal/humify/analyze"
@@ -193,6 +194,41 @@ func printBaselineSaved(snap verify.BaselineSnapshot) {
 // a quiet fall-through would be the original gap wearing a success message.
 func printNoBaseline() {
 	fmt.Println("No saved baseline — cannot compare. Run `humify verify --save-baseline` BEFORE editing, then `humify verify --baseline` after. Falling back to a plain run:")
+}
+
+// analysisDelta renders a one-line "since last analyze" summary comparing two runs'
+// totals and per-signal counts, listing only the signals whose count changed
+// (sorted for determinism). It makes a resolved finding visible even when the
+// headline health score is correctly sticky for an info-only fix. Returns "" when
+// nothing changed.
+func analysisDelta(prior, cur analyze.Summary) string {
+	seen := map[string]bool{}
+	var sigs []string
+	for s := range prior.BySignal {
+		if !seen[s] {
+			seen[s], sigs = true, append(sigs, s)
+		}
+	}
+	for s := range cur.BySignal {
+		if !seen[s] {
+			seen[s], sigs = true, append(sigs, s)
+		}
+	}
+	sort.Strings(sigs)
+	var parts []string
+	for _, s := range sigs {
+		if prior.BySignal[s] != cur.BySignal[s] {
+			parts = append(parts, fmt.Sprintf("%s %d→%d", s, prior.BySignal[s], cur.BySignal[s]))
+		}
+	}
+	if prior.Findings == cur.Findings && len(parts) == 0 {
+		return ""
+	}
+	line := fmt.Sprintf("since last analyze: findings %d→%d", prior.Findings, cur.Findings)
+	if len(parts) > 0 {
+		line += "; " + strings.Join(parts, "; ")
+	}
+	return line
 }
 
 // printApply renders the outcome of an apply.

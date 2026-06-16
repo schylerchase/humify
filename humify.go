@@ -28,6 +28,10 @@ func cmdAnalyze(opts options) int {
 	if err != nil {
 		return fail(opts, "analyze_error", exitError, "analyze failed: "+err.Error())
 	}
+	// Read the prior analysis BEFORE Save overwrites it, so a "since last analyze"
+	// delta can show small wins the (correctly sticky) health score hides.
+	var prior analyze.Analysis
+	hadPrior := hstate.Load(root, hstate.AnalysisFile, &prior) == nil
 	if err := hstate.Save(root, hstate.AnalysisFile, a); err != nil {
 		return fail(opts, "write_error", exitError, "could not write analysis: "+err.Error())
 	}
@@ -39,6 +43,11 @@ func cmdAnalyze(opts options) int {
 		return exitOK
 	}
 	printAnalysis(a)
+	if hadPrior {
+		if d := analysisDelta(prior.Summary, a.Summary); d != "" {
+			fmt.Println(d)
+		}
+	}
 	return exitOK
 }
 
