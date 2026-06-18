@@ -11,9 +11,11 @@
 package graph
 
 import (
+	"os"
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/schylerryan/humify/internal/area"
 	"github.com/schylerryan/humify/internal/scan"
@@ -33,25 +35,35 @@ type Result struct {
 	FanOut map[string]int `json:"fan_out"`
 }
 
-// BuildEdges resolves intra-repo relative imports into area->area edges.
-// Bare/external module imports are ignored — they don't couple local areas.
+// BuildEdges resolves intra-repo imports into area->area edges. Two resolution
+// schemes run side by side: relative imports (`./x`, JS/TS/Python) resolve to a
+// file, and Go module-path imports (`<module>/pkg`) resolve to a package
+// directory. Truly external imports (stdlib, third-party) couple nothing and are
+// dropped. Without the module-path scheme, Go's absolute intra-repo imports all
+// looked external, so every area collapsed into a single wave.
 func BuildEdges(root string, areas []area.Area) []Edge {
-	byPath := map[string]string{} // rel-without-ext -> area id
+	byPath := map[string]string{}  // rel-without-ext -> area id (relative imports resolve to a file)
+	dirArea := map[string]string{} // package dir -> area id (module-path imports resolve to a dir)
 	fileArea := map[string]string{}
 	for _, a := range areas {
 		for _, f := range a.Files {
 			byPath[stripExt(f.Rel)] = a.ID
+			dirArea[path.Dir(f.Rel)] = a.ID
 			fileArea[f.Rel] = a.ID
 		}
 	}
+	modulePath := goModulePath(root)
 	seen := map[Edge]bool{}
 	var edges []Edge
 	for _, a := range areas {
 		for _, f := range a.Files {
 			abs := filepath.Join(root, filepath.FromSlash(f.Rel))
+			from := fileArea[f.Rel]
 			for _, imp := range scan.ImportsOf(abs) {
 				to := resolve(f.Rel, imp, byPath)
-				from := fileArea[f.Rel]
+				if to == "" {
+					to = resolveModule(imp, modulePath, dirArea)
+				}
 				if to == "" || to == from {
 					continue
 				}
@@ -63,6 +75,39 @@ func BuildEdges(root string, areas []area.Area) []Edge {
 		}
 	}
 	return edges
+}
+
+// resolveModule maps a Go module-path import to the area owning the imported
+// package directory. Intra-repo Go imports are absolute (`<module>` or
+// `<module>/<pkgdir>`), never relative, so the relative resolver never sees them.
+// Returns "" for stdlib/third-party imports or when no go.mod gives a module path.
+func resolveModule(imp, modulePath string, dirArea map[string]string) string {
+	if modulePath == "" || imp == "" || imp[0] == '.' {
+		return ""
+	}
+	if imp == modulePath {
+		return dirArea["."]
+	}
+	if rel, ok := strings.CutPrefix(imp, modulePath+"/"); ok {
+		return dirArea[rel]
+	}
+	return ""
+}
+
+// goModulePath reads the module path from root/go.mod, or "" when there is none
+// (a non-Go target). Only the `module` directive is needed to recognize which
+// imports point back into this repo.
+func goModulePath(root string) string {
+	b, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "module "); ok {
+			return strings.TrimSpace(rest)
+		}
+	}
+	return ""
 }
 
 func resolve(fromRel, imp string, byPath map[string]string) string {

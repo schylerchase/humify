@@ -38,6 +38,12 @@ var sourceExt = map[string]bool{
 var (
 	branchRe = regexp.MustCompile(`\b(if|for|while|case|catch|switch)\b|&&|\|\||\?`)
 	importRe = regexp.MustCompile(`(?m)(?:import\s+[^'"]*['"]([^'"]+)['"])|(?:require\(\s*['"]([^'"]+)['"]\s*\))|(?:from\s+([^\s]+)\s+import)|(?:#include\s+["<]([^">]+)[">])|(?:import\s+"([^"]+)")`)
+	// Go groups imports as `import ( "a"\n "b" )`; the line-oriented importRe only
+	// catches the first spec, so a grouped block's later imports (often the
+	// intra-repo ones) were silently dropped. goImportBlockRe captures each block
+	// body; goImportSpecRe then pulls every quoted path within it.
+	goImportBlockRe = regexp.MustCompile(`(?s)import\s*\(\s*(.*?)\)`)
+	goImportSpecRe  = regexp.MustCompile(`"([^"]+)"`)
 )
 
 // WalkSource walks root and returns facts for every source file, skipping
@@ -104,11 +110,19 @@ func ImportsOf(abs string) []string {
 		return nil
 	}
 	var out []string
-	for _, m := range importRe.FindAllStringSubmatch(string(b), -1) {
+	src := string(b)
+	for _, m := range importRe.FindAllStringSubmatch(src, -1) {
 		for _, g := range m[1:] {
 			if g != "" {
 				out = append(out, g)
 			}
+		}
+	}
+	// Go grouped import blocks: pull every quoted path the line-oriented importRe
+	// could not reach. Harmless for non-Go files, which don't use `import ( … )`.
+	for _, blk := range goImportBlockRe.FindAllStringSubmatch(src, -1) {
+		for _, spec := range goImportSpecRe.FindAllStringSubmatch(blk[1], -1) {
+			out = append(out, spec[1])
 		}
 	}
 	return out

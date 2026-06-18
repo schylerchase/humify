@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/schylerryan/humify/internal/area"
@@ -79,6 +80,34 @@ func TestBuildEdgesRelativeImports(t *testing.T) {
 		if e.To == "" {
 			t.Fatalf("empty edge target: %+v", e)
 		}
+	}
+}
+
+func TestBuildEdgesGoModulePaths(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/app\n\ngo 1.26\n")
+	// Single-line import form.
+	writeFile(t, filepath.Join(root, "main.go"),
+		"package main\nimport \"example.com/app/util\"\nimport \"fmt\"\nfunc main() {}\n")
+	// Grouped import form — the common Go style.
+	writeFile(t, filepath.Join(root, "cmd", "run.go"),
+		"package cmd\n\nimport (\n\t\"fmt\"\n\t\"example.com/app/util\"\n)\n\nvar _ = fmt.Sprint\n")
+	writeFile(t, filepath.Join(root, "util", "util.go"), "package util\nfunc U() {}\n")
+
+	files := []scan.File{
+		{Rel: "main.go", LOC: 4}, {Rel: "cmd/run.go", LOC: 7}, {Rel: "util/util.go", LOC: 2},
+	}
+	areas := area.Decompose(files, 1000) // group by top-level dir: root, cmd, util
+	edges := BuildEdges(root, areas)
+	// Both main (root) and cmd import util; "fmt" is external. Expect two edges into util.
+	intoUtil := 0
+	for _, e := range edges {
+		if strings.HasSuffix(e.To, "util") {
+			intoUtil++
+		}
+	}
+	if intoUtil != 2 {
+		t.Fatalf("want 2 module-path edges into util (single-line + grouped), got %d of %+v", intoUtil, edges)
 	}
 }
 
