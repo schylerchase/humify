@@ -20,13 +20,15 @@ import (
 )
 
 func main() {
-	failAudit, badAudit := false, false
+	failAudit, badAudit, crashExec := false, false, false
 	for _, a := range os.Args[1:] {
 		switch a {
 		case "--fail-audit":
 			failAudit = true
 		case "--bad-audit":
 			badAudit = true
+		case "--crash-exec":
+			crashExec = true
 		}
 	}
 	data, _ := io.ReadAll(os.Stdin)
@@ -56,6 +58,13 @@ func main() {
 		writeFile(pathAfter(prompt, "Write the plan to"),
 			"# Plan for "+id+"\n\n1. **what & where**: src/util.go — extract helper.\n   **addresses**: finding 1.\n   **characterization test**: lock current output.\n   **risk**: none.\n")
 	case strings.Contains(header, "executor"):
+		if crashExec {
+			// Die before writing a SUMMARY or committing: the branch stays at its
+			// fork point. Exercises the merge barrier's no-commit gate — an empty
+			// slice must block loudly, not merge as a silent no-op.
+			fmt.Fprintf(os.Stderr, "fakeagent: simulated executor crash in %s\n", id)
+			os.Exit(1)
+		}
 		writeFile(pathAfter(prompt, "Write a SUMMARY of what you actually did to"),
 			"# Summary "+id+"\n\nExtracted helper; added characterization test.\n")
 		git("add", "-A")

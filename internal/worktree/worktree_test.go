@@ -14,6 +14,7 @@ type mockGit struct {
 	head         string
 	addErr       error
 	exists       map[string]bool   // branch -> exists (default true)
+	tipVal       map[string]string // branch -> tip sha (default "committed", != base)
 	mergeBaseVal map[string]string // branch -> merge-base (default defaultBase)
 	defaultBase  string
 	deletedVal   map[string][]string // branch -> deleted files
@@ -31,7 +32,7 @@ type mockGit struct {
 func newMock() *mockGit {
 	return &mockGit{
 		head: "base0", defaultBase: "base0",
-		exists: map[string]bool{}, mergeBaseVal: map[string]string{},
+		exists: map[string]bool{}, tipVal: map[string]string{}, mergeBaseVal: map[string]string{},
 		deletedVal: map[string][]string{}, cleanVal: map[string]bool{}, mergeErr: map[string]bool{},
 	}
 }
@@ -45,6 +46,12 @@ func (m *mockGit) BranchExists(b string) bool {
 		return v
 	}
 	return true
+}
+func (m *mockGit) Tip(b string) (string, error) {
+	if v, ok := m.tipVal[b]; ok {
+		return v, nil
+	}
+	return "committed", nil // default: ahead of base0, so the no-commit gate passes
 }
 func (m *mockGit) MergeBase(a, b string) (string, error) {
 	if v, ok := m.mergeBaseVal[b]; ok {
@@ -128,6 +135,7 @@ func TestMergeWaveGates(t *testing.T) {
 		{"branch-name", func(m *mockGit, e *Entry) { e.Branch = "rogue-branch" }, "branch-name"},
 		{"branch-exists", func(m *mockGit, e *Entry) { m.exists[e.Branch] = false }, "branch-exists"},
 		{"merge-base", func(m *mockGit, e *Entry) { m.mergeBaseVal[e.Branch] = "different" }, "merge-base"},
+		{"no-commit", func(m *mockGit, e *Entry) { m.tipVal[e.Branch] = e.ExpectedBase }, "no-commit"},
 		{"no-deletions", func(m *mockGit, e *Entry) { m.deletedVal[e.Branch] = []string{"gone.go"} }, "no-deletions"},
 		{"clean-worktree", func(m *mockGit, e *Entry) { m.cleanVal[e.WorktreePath] = false }, "clean-worktree"},
 		{"merge", func(m *mockGit, e *Entry) { m.mergeErr[e.Branch] = true }, "merge"},

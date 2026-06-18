@@ -39,6 +39,10 @@ type Git interface {
 	Head() (string, error)
 	AddWorktree(path, branch, base string) error
 	BranchExists(branch string) bool
+	// Tip resolves a branch's current commit SHA. The barrier uses it to reject a
+	// slice whose branch never advanced past its fork point — a crashed or no-op
+	// executor — which would otherwise merge as a silent, miscounted no-op.
+	Tip(branch string) (string, error)
 	MergeBase(a, b string) (string, error)
 	DeletedFiles(base, branch string) ([]string, error)
 	IsClean(worktreePath string) (bool, error)
@@ -147,6 +151,17 @@ func mergeOne(g Git, e Entry, baseRef string) (sha, gate, reason string, ok bool
 	}
 	if mb != e.ExpectedBase {
 		return "", "merge-base", fmt.Sprintf("merge-base %s != expected base %s (branch moved off its fork point)", short(mb), short(e.ExpectedBase)), false
+	}
+	// A branch still sitting at its fork point carries no commit: the executor
+	// crashed or did nothing. Merging it is a silent no-op that the barrier would
+	// otherwise count as a successful slice — block it loudly instead, so an empty
+	// slice is never reported as merged.
+	tip, err := g.Tip(e.Branch)
+	if err != nil {
+		return "", "no-commit", "cannot resolve branch tip: " + err.Error(), false
+	}
+	if tip == e.ExpectedBase {
+		return "", "no-commit", "branch is still at its fork point — executor produced no commit (crashed or did nothing)", false
 	}
 	dels, err := g.DeletedFiles(e.ExpectedBase, e.Branch)
 	if err != nil {

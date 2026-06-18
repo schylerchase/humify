@@ -52,6 +52,10 @@ func (g gitCLI) BranchExists(branch string) bool {
 	return err == nil
 }
 
+func (g gitCLI) Tip(branch string) (string, error) {
+	return run(g.repoDir, "rev-parse", "--verify", "refs/heads/"+branch)
+}
+
 func (g gitCLI) MergeBase(a, b string) (string, error) {
 	return run(g.repoDir, "merge-base", a, b)
 }

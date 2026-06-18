@@ -188,6 +188,30 @@ func TestUntangleRunE2E(t *testing.T) {
 			}
 		}
 	})
+
+	// Crashed executor — regression lock for the no-commit merge gate, found by the
+	// real-OSS dogfood. An executor that dies before committing leaves its slice
+	// branch sitting at the fork point. The barrier must BLOCK that empty slice
+	// (gate "no-commit"), not merge it as a silent no-op and miscount it as a merged
+	// slice (which is what happened before the gate existed — the wave reported
+	// "merged N" while one slice contributed nothing, surviving only via the
+	// separate no-progress guard).
+	t.Run("crashed executor leaves an empty slice the barrier blocks (no-commit)", func(t *testing.T) {
+		root, head := multiAreaFixture(t)
+		code, out := runHumify(t, "untangle", "run", "--root", root,
+			"--agent-cmd", agent+" --crash-exec", "--execute", "--json")
+		if code != exitDrift {
+			t.Fatalf("a crashed executor (empty slice) must block (exit 2), got %d\n%s", code, out)
+		}
+		if !strings.Contains(out, "no-commit") {
+			t.Fatalf("the empty slice must block at the no-commit gate, got:\n%s", out)
+		}
+		// Nothing was committed, so nothing must merge — the empty slice is caught
+		// before any no-op merge can advance HEAD.
+		if now := gitHead(t, root); now != head {
+			t.Errorf("HEAD moved (%s → %s) — an empty slice must not merge", head, now)
+		}
+	})
 }
 
 // TestVerifyBaselineExitCodesE2E is the load-bearing guard for baseline-aware
