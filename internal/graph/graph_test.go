@@ -111,6 +111,78 @@ func TestBuildEdgesGoModulePaths(t *testing.T) {
 	}
 }
 
+func TestBuildEdgesDeepWaves(t *testing.T) {
+	// a -> b -> c -> d: a four-link dependency chain across top-level dirs, the
+	// deep multi-wave case real OSS dogfood targets (cobra/testify) never reached.
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/app\n\ngo 1.26\n")
+	writeFile(t, filepath.Join(root, "a", "a.go"), "package a\nimport \"example.com/app/b\"\nvar _ = 0\n")
+	writeFile(t, filepath.Join(root, "b", "b.go"), "package b\nimport \"example.com/app/c\"\nvar _ = 0\n")
+	writeFile(t, filepath.Join(root, "c", "c.go"), "package c\nimport \"example.com/app/d\"\nvar _ = 0\n")
+	writeFile(t, filepath.Join(root, "d", "d.go"), "package d\nvar _ = 0\n")
+	files := []scan.File{{Rel: "a/a.go"}, {Rel: "b/b.go"}, {Rel: "c/c.go"}, {Rel: "d/d.go"}}
+	areas := area.Decompose(files, 1000)
+	r := Compute(idsOf(areas), BuildEdges(root, areas))
+	if len(r.Waves) != 4 {
+		t.Fatalf("a→b→c→d should yield 4 ordered waves, got %d: %v", len(r.Waves), r.Waves)
+	}
+	if !contains(r.Waves[0], areaForDir(t, areas, "d")) {
+		t.Fatalf("d (no deps) must lead in wave 0, got %v", r.Waves)
+	}
+	if !contains(r.Waves[3], areaForDir(t, areas, "a")) {
+		t.Fatalf("a (transitive dependent) must be last, got %v", r.Waves)
+	}
+}
+
+func TestBuildEdgesAreaCycle(t *testing.T) {
+	// Two top-level dirs that import each other. Go forbids package-level cycles,
+	// but AREA-level cycles arise in real repos when two dirs mutually reference
+	// each other's (different) packages — the cycle-cluster path that never fired
+	// on cobra/testify (cycles=0). The graph must surface it, not hang or mislabel.
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/app\n\ngo 1.26\n")
+	writeFile(t, filepath.Join(root, "x", "x.go"), "package x\nimport \"example.com/app/y\"\nvar _ = 0\n")
+	writeFile(t, filepath.Join(root, "y", "y.go"), "package y\nimport \"example.com/app/x\"\nvar _ = 0\n")
+	files := []scan.File{{Rel: "x/x.go"}, {Rel: "y/y.go"}}
+	areas := area.Decompose(files, 1000)
+	r := Compute(idsOf(areas), BuildEdges(root, areas))
+	if len(r.Cycles) != 1 {
+		t.Fatalf("x↔y is one cycle cluster, got %d: %v", len(r.Cycles), r.Cycles)
+	}
+	cyc := r.CycleSet()
+	if !cyc[areaForDir(t, areas, "x")] || !cyc[areaForDir(t, areas, "y")] {
+		t.Fatalf("both x and y must be in the cycle set: %v", r.Cycles)
+	}
+}
+
+func idsOf(areas []area.Area) []string {
+	ids := make([]string, len(areas))
+	for i, a := range areas {
+		ids[i] = a.ID
+	}
+	return ids
+}
+
+func areaForDir(t *testing.T, areas []area.Area, root string) string {
+	t.Helper()
+	for _, a := range areas {
+		if a.Root == root {
+			return a.ID
+		}
+	}
+	t.Fatalf("no area owns dir %q", root)
+	return ""
+}
+
+func contains(ids []string, id string) bool {
+	for _, x := range ids {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
 func writeFile(t *testing.T, p, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
