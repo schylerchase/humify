@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -68,7 +69,8 @@ func Run(root string, now time.Time) (Validation, error) {
 		GeneratedAt: now.UTC().Format(time.RFC3339), Passed: true,
 	}
 	cmds := Detect(project, root)
-	if len(cmds) == 0 {
+	skipped := DetectSkipped(project)
+	if len(cmds) == 0 && len(skipped) == 0 {
 		v.Commands = []CmdResult{{Kind: "all", Skipped: true, Reason: "no validation commands detected for this project"}}
 		return v, nil // Validated stays false: nothing ran, so this is not a real pass.
 	}
@@ -81,6 +83,15 @@ func Run(root string, now time.Time) (Validation, error) {
 		if r.Ran && !r.Passed {
 			v.Passed = false
 		}
+	}
+	// Surface declared <kind>:* scripts verify did not run, so a green verdict that
+	// only covers `test` cannot be mistaken for one that also ran `test:unit`. These
+	// are Ran=false, so they never flip Validated/Passed — they only widen honesty.
+	for _, c := range skipped {
+		v.Commands = append(v.Commands, CmdResult{
+			Kind: c.kind, Command: c.line, Skipped: true,
+			Reason: "declared validation script not run by verify — the verdict's scope excludes it; run it manually to widen coverage",
+		})
 	}
 	return v, nil
 }
@@ -145,6 +156,29 @@ func nodeCommands(project detect.Project) []command {
 		}
 	}
 	return cmds
+}
+
+// DetectSkipped returns declared validation scripts that Detect deliberately does
+// NOT run: npm <kind>:* siblings such as `test:unit`/`test:node` beside `test`.
+// nodeCommands runs only the exact-named build/lint/typecheck/test, so without
+// this a project whose real coverage lives in test:unit would show a green that
+// only ran `test`. Reporting them as skipped keeps the verdict's scope honest.
+// Colon is the npm namespacing idiom; a hyphenated `test-ci` is intentionally not
+// matched (it is not a recognized sibling convention).
+func DetectSkipped(project detect.Project) []command {
+	runner := scriptRunner(project.PackageManager)
+	if runner == "" {
+		return nil
+	}
+	kinds := map[string]bool{"build": true, "lint": true, "typecheck": true, "test": true}
+	var out []command
+	for name := range project.Scripts {
+		if k, _, ok := strings.Cut(name, ":"); ok && kinds[k] {
+			out = append(out, command{k, runner + " run " + name})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].line < out[j].line })
+	return out
 }
 
 // scriptRunner returns the npm-style runner for a JS package manager, or "".

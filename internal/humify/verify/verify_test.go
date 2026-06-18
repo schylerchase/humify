@@ -44,6 +44,36 @@ func TestDetectNodeUsesDeclaredScriptsOnly(t *testing.T) {
 	}
 }
 
+// Regression for the Azure-Mapper dogfood gap: a project with `test` (run) plus
+// `test:unit`/`test:node` (NOT run) must surface the siblings as skipped, so a
+// green that only ran `test` is not mistaken for full coverage.
+func TestDetectSkippedReportsNamespacedSiblings(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, root, "package.json", `{"scripts":{`+
+		`"test":"playwright test","test:unit":"jest","test:node":"node --test",`+
+		`"lint":"eslint .","lint:ci":"eslint . --max-warnings 0","foo:bar":"echo hi"}}`)
+	writeFile(t, root, "package-lock.json", "{}")
+
+	lines := map[string]bool{}
+	for _, c := range skippedFor(t, root) {
+		lines[c.line] = true
+	}
+	for _, want := range []string{"npm run test:unit", "npm run test:node", "npm run lint:ci"} {
+		if !lines[want] {
+			t.Errorf("expected skipped sibling %q, got %v", want, lines)
+		}
+	}
+	// Canonical (run) scripts and non-validation namespaces must NOT be reported as skipped.
+	for _, bad := range []string{"npm run test", "npm run lint", "npm run foo:bar"} {
+		if lines[bad] {
+			t.Errorf("%q must not be reported as a skipped sibling: %v", bad, lines)
+		}
+	}
+	if !kindSet(detectFor(t, root))["test"] {
+		t.Error("canonical test script should still be detected to run")
+	}
+}
+
 func TestRunNoCommandsIsSkippedNotFailed(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "notes.txt", "just text\n")
@@ -106,6 +136,15 @@ func detectFor(t *testing.T, root string) []command {
 		t.Fatal(err)
 	}
 	return Detect(detect.Detect(res, root), root)
+}
+
+func skippedFor(t *testing.T, root string) []command {
+	t.Helper()
+	res, err := scan.Walk(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return DetectSkipped(detect.Detect(res, root))
 }
 
 func kindSet(cmds []command) map[string]bool {
