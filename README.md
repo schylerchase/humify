@@ -23,7 +23,7 @@ go build -o humify .
 ```sh
 humify analyze [PATH]                              # review the repo → .humify/analysis.json
 humify plan    [PATH]                              # rank fixes into HMF-### items → .humify/plan.json
-humify verify  [PATH]                              # run detected test/build/lint/typecheck
+humify verify  [PATH] [--save-baseline|--baseline]  # run detected test/build/lint/typecheck
 humify status  [PATH]                              # print current analysis/plan/validation state
 humify doctor  [PATH]                              # check wiring, git, stack, and repo readiness
 humify apply   --target HMF-### [--dry-run|--yes] [PATH]
@@ -44,6 +44,32 @@ humify verify
 ## Sequencing a cleanup session
 
 Humify *ranks* items but does not *sequence* them. To turn the plan into a single next move (do-this-first, the prize, where to stop), see [docs/rank-then-judge.md](docs/rank-then-judge.md) — a reusable prompt pattern, not a command. The sequencing is judgment; humify's verdicts remain the verified facts.
+
+## Baseline-aware verify (for AI editors)
+
+When an agent edits a tree it didn't write, a red `verify` is ambiguous: did the
+change break the build, or was the checkout already failing (missing deps, a
+pre-existing red test)? Baseline-aware verify removes the guess.
+
+```sh
+humify verify --save-baseline   # BEFORE editing: snapshot the pre-edit result
+# … the agent edits the source …
+humify verify --baseline        # AFTER editing: diff against the snapshot
+```
+
+- `--save-baseline` captures the current validation into `.humify/verify-baseline.json`
+  and **always exits 0** — an already-red baseline is expected and must not block the
+  edit step. It records the HEAD commit and whether the tree was already dirty at save.
+- `--baseline` re-runs the checks and classifies each as **newly failing** (a regression
+  the change caused), **already failing** (ambient — red before the edit), **fixed**, or
+  **indeterminate**. It exits **2 only on a newly-failing check**; ambient failures exit
+  0. With no saved baseline it degrades loudly to a plain run.
+- It warns when the baseline is **stale** (HEAD moved since the save) or was **saved on a
+  dirty tree** (the breakage may already be baked into the baseline).
+
+`verify` only ever reads source and writes under `.humify/`. Add `--json` for the machine
+verdict (`newly_failing`, `already_failing`, `fixed`, `indeterminate`, `baseline_stale`,
+`baseline_dirty_at_save`).
 
 ## What `analyze` looks for
 
@@ -72,6 +98,7 @@ Scores five health categories (0–100): **readability, maintainability, correct
   analysis.json          findings + health scores
   plan.json              ranked HMF-### refactor items
   validation.json        test/build/lint results
+  verify-baseline.json   saved pre-edit snapshot (verify --save-baseline)
   delete-me/<id>/        quarantined files (safe apply only)
   HUMIFY_REPORT.md       optional markdown summary (--markdown)
   HUMIFY_PLAN.md         optional markdown plan (--markdown)
