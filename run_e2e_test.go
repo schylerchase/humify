@@ -153,6 +153,41 @@ func TestUntangleRunE2E(t *testing.T) {
 			t.Fatalf("run left a stale cursor — resume falsely reports drift:\n%s", out)
 		}
 	})
+
+	// Multi-area merge barrier — the regression lock for 8d21059, which until now
+	// was only dogfooded by hand. A wave with two INDEPENDENT areas forks two
+	// worktrees; conflictagent makes both executors write the same shared file with
+	// different content, so the SECOND merge conflicts. The barrier must abort that
+	// merge (no dangling MERGE_HEAD), keep the first slice it already landed, and
+	// stop Blocked (exit 2) — never leave the repo mid-merge or spin.
+	t.Run("multi-area conflicting merge aborts cleanly, blocks (8d21059)", func(t *testing.T) {
+		cflt := buildConflictAgent(t)
+		root, head := multiAreaFixture(t)
+		code, out := runHumify(t, "untangle", "run", "--root", root,
+			"--agent-cmd", cflt, "--execute", "--json")
+		if code != exitDrift {
+			t.Fatalf("a merge conflict must block (exit 2), got %d\n%s", code, out)
+		}
+		if !strings.Contains(out, "blocked") {
+			t.Fatalf("want a merge-barrier blocked verdict, got:\n%s", out)
+		}
+		// The heart of 8d21059: a conflicted merge is ABORTED, never left in place.
+		// A surviving MERGE_HEAD is the exact corruption AbortMerge exists to prevent
+		// (and what would make the next merge/resume choke on stale mid-merge state).
+		if fileExists(filepath.Join(root, ".git", "MERGE_HEAD")) {
+			t.Error("MERGE_HEAD survived — the conflict was not aborted (AbortMerge regressed)")
+		}
+		// One slice merged before the other conflicted, so HEAD must have advanced.
+		if now := gitHead(t, root); now == head {
+			t.Error("HEAD did not move — the first slice should have merged before the conflict")
+		}
+		// No unmerged index entries strewn across the working tree (.humify churn aside).
+		for _, line := range strings.Split(strings.TrimSpace(runGit(t, root, "status", "--porcelain")), "\n") {
+			if len(line) >= 2 && (line[0] == 'U' || line[1] == 'U') {
+				t.Errorf("unmerged entries left in the working tree:\n%s", line)
+			}
+		}
+	})
 }
 
 // TestVerifyBaselineExitCodesE2E is the load-bearing guard for baseline-aware
@@ -241,6 +276,22 @@ func buildFakeAgent(t *testing.T) string {
 	return bin
 }
 
+// buildConflictAgent compiles testdata/conflictagent — it behaves like fakeagent
+// through audit/plan/check, but as an executor writes a shared .humify file with
+// per-area content so the second merge in a wave conflicts (the AbortMerge path).
+func buildConflictAgent(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "conflictagent")
+	src, err := filepath.Abs(filepath.Join("testdata", "conflictagent", "main.go"))
+	if err != nil {
+		t.Fatalf("resolve conflictagent source: %v", err)
+	}
+	if out, err := exec.Command("go", "build", "-o", bin, src).CombinedOutput(); err != nil {
+		t.Fatalf("build conflictagent: %v\n%s", err, out)
+	}
+	return bin
+}
+
 // fixture creates a committed git repo with a small slop-y source area under src/
 // and bootstraps a .humify/ project on it (heatmap). It returns the repo root and
 // its initial HEAD so a test can assert whether the driver moved it.
@@ -262,6 +313,54 @@ func fixture(t *testing.T) (root, head string) {
 		t.Fatalf("heatmap bootstrap failed (%d):\n%s", code, out)
 	}
 	return root, gitHead(t, root)
+}
+
+// multiAreaFixture is fixture's multi-area sibling: a flat "root" area plus an
+// independent scripts/ subarea under src/ (no cross-import), so area.Decompose
+// yields two areas that land in the same wave — the driver then forks two
+// worktrees, the prerequisite for exercising the merge barrier. README.md exists
+// only so conflictagent's canned finding references a real file. It fails fast if
+// the bootstrap does not split into ≥2 areas, so the conflict test can never
+// silently degrade to a single slice (and thus never reach a merge conflict).
+func multiAreaFixture(t *testing.T) (root, head string) {
+	t.Helper()
+	root = t.TempDir()
+	mustWrite(t, filepath.Join(root, "README.md"), "# fixture\n")
+	mustWrite(t, filepath.Join(root, "src", "core.go"),
+		"package src\n\n// Core does stuff.\nfunc Core() { var data interface{}; _ = data }\n")
+	mustWrite(t, filepath.Join(root, "src", "scripts", "run.go"),
+		"package scripts\n\nfunc Run() int { return 0 }\n")
+	for _, args := range [][]string{
+		{"init"}, {"config", "user.email", "e2e@humify.test"}, {"config", "user.name", "Humify E2E"},
+		{"add", "-A"}, {"commit", "-m", "init"},
+	} {
+		runGit(t, root, args...)
+	}
+	if code, out := runHumify(t, "untangle", "heatmap", "--target", filepath.Join(root, "src"),
+		"--root", root, "--json"); code != exitOK {
+		t.Fatalf("heatmap bootstrap failed (%d):\n%s", code, out)
+	}
+	if n := countAreaDirs(t, root); n < 2 {
+		t.Fatalf("multi-area fixture produced only %d area(s); the merge barrier needs ≥2", n)
+	}
+	return root, gitHead(t, root)
+}
+
+// countAreaDirs counts the per-area scaffold directories heatmap wrote under
+// .humify/areas — one per decomposed area.
+func countAreaDirs(t *testing.T, root string) int {
+	t.Helper()
+	ents, err := os.ReadDir(filepath.Join(root, ".humify", "areas"))
+	if err != nil {
+		t.Fatalf("read areas dir: %v", err)
+	}
+	n := 0
+	for _, e := range ents {
+		if e.IsDir() {
+			n++
+		}
+	}
+	return n
 }
 
 // runHumify invokes the CLI entrypoint in-process, capturing stdout so tests can
