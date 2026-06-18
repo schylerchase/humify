@@ -363,15 +363,47 @@ func groupBySignal(findings []analyze.Finding) map[string][]analyze.Finding {
 // (descending), then by title for stability.
 func sortItems(items []Item, findings []analyze.Finding) {
 	weight := penaltyBySignal(findings)
+	maxSev := maxSeverityBySignal(findings)
 	sort.SliceStable(items, func(i, j int) bool {
 		if oi, oj := order(items[i].Signal), order(items[j].Signal); oi != oj {
 			return oi < oj
+		}
+		// Severity tier dominates volume: a signal carrying any major-severity
+		// finding outranks one with only warnings, no matter how many. Without this,
+		// a numerous low-severity signal (broad_catch fires on every JS catch — JS
+		// has no narrow catch) buries a scarce high-severity one (swallowed_error, a
+		// silent-failure bug) on summed weight alone. Volume only breaks ties within
+		// a severity tier.
+		if si, sj := maxSev[items[i].Signal], maxSev[items[j].Signal]; si != sj {
+			return si > sj
 		}
 		if weight[items[i].Signal] != weight[items[j].Signal] {
 			return weight[items[i].Signal] > weight[items[j].Signal]
 		}
 		return items[i].Title < items[j].Title
 	})
+}
+
+// maxSeverityBySignal records the highest severity seen per signal (major > warning
+// > info), so ranking can let severity dominate raw finding volume.
+func maxSeverityBySignal(findings []analyze.Finding) map[string]int {
+	rank := func(sev string) int {
+		switch sev {
+		case "major":
+			return 3
+		case "warning":
+			return 2
+		default:
+			return 1
+		}
+	}
+	m := map[string]int{}
+	for _, f := range findings {
+		if r := rank(f.Severity); r > m[f.Signal] {
+			m[f.Signal] = r
+		}
+	}
+	return m
 }
 
 // penaltyBySignal sums a severity weight per signal to rank impact.

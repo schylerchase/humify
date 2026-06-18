@@ -264,6 +264,36 @@ func TestItemCarriesVerification(t *testing.T) {
 	}
 }
 
+// Regression for the Azure-Mapper dogfood: 93 broad_catch (warning) buried 13
+// swallowed_error (major) on summed volume (465 vs 130). Severity tier must
+// dominate volume — a scarce major-severity signal outranks a flood of warnings.
+func TestRankingSeverityDominatesVolume(t *testing.T) {
+	fs := []analyze.Finding{
+		{ID: "S1", Category: "correctness", Signal: "swallowed_error", File: "a.js", Line: 1, Severity: "major"},
+		{ID: "S2", Category: "correctness", Signal: "swallowed_error", File: "b.js", Line: 1, Severity: "major"},
+	}
+	for i := 0; i < 20; i++ {
+		fs = append(fs, analyze.Finding{ID: fmt.Sprintf("B%d", i), Category: "correctness",
+			Signal: "broad_catch", File: fmt.Sprintf("c%d.js", i), Line: 1, Severity: "warning"})
+	}
+	p := Build(analyze.Analysis{Target: "/repo", Findings: fs})
+
+	rank := map[string]int{}
+	for i, it := range p.Items {
+		if _, seen := rank[it.Signal]; !seen {
+			rank[it.Signal] = i
+		}
+	}
+	sw, okS := rank["swallowed_error"]
+	bc, okB := rank["broad_catch"]
+	if !okS || !okB {
+		t.Fatalf("expected both signals as items; ranks=%v", rank)
+	}
+	if sw > bc {
+		t.Fatalf("swallowed_error (2 major) must outrank broad_catch (20 warning) despite volume; ranks=%v", rank)
+	}
+}
+
 func findSignal(p Plan, signal string) (Item, bool) {
 	for _, it := range p.Items {
 		if it.Signal == signal {
